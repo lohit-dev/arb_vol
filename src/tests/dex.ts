@@ -132,7 +132,7 @@ class ExternalAPIVolumeTracker {
         return null;
       }
 
-      const pool = pools[0]; // Get the first (and only) SEED/WETH pool
+      const pool = pools[0]; // we gave only one pool
       const pairAddress = pool.address;
 
       const url = `https://api.dexscreener.com/latest/dex/pairs/${chainId}/${pairAddress}`;

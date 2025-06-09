@@ -7,7 +7,7 @@ async function main(): Promise<void> {
   const bot = new ArbitrageService(privateKey);
 
   bot.setMinProfitThreshold(0.1);
-  bot.setTradeAmount("1000000000000000000"); // 1 token
+  bot.setTradeAmount("1000000000000000000"); // 1 token ^18
   bot.setProcessingCooldown(2000); // 2 second cooldown between processing
 
   await bot.manualVolumeCheck();
@@ -27,7 +27,6 @@ async function main(): Promise<void> {
   await bot.startEventListening();
 }
 
-// // Alternative execution for testing without events
 // async function testScan(): Promise<void> {
 //   const bot = new ArbitrageService(
 //     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -44,7 +43,5 @@ async function main(): Promise<void> {
 //   console.log(JSON.stringify(bot.getStatus(), null, 2));
 // }
 
-if (require.main === module) {
-  main().catch(console.error);
-  // testScan().catch(console.error);
-}
+// testScan().catch(console.error);
+main().catch(console.error);

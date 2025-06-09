@@ -7,13 +7,6 @@ import {
   POOL_CONFIGS,
   SWAP_ROUTER_ADDRESSES,
   COINGECKO_CONFIG,
-  NetworkConfig,
-  ArbitrageOpportunity,
-  TradeParams,
-  SwapEventData,
-  PendingArbitrage,
-  PriceData,
-  VOLUME_CONFIG,
 } from "../config/config";
 import {
   ERC20_ABI,
@@ -22,6 +15,14 @@ import {
   SWAP_ROUTER_ABI,
 } from "../contracts/abi";
 import { VolumeService } from "./volume";
+import {
+  ArbitrageOpportunity,
+  NetworkConfig,
+  PendingArbitrage,
+  PriceData,
+  SwapEventData,
+  TradeParams,
+} from "../types";
 
 interface PoolConfig {
   address: string;
@@ -33,7 +34,6 @@ export class ArbitrageService {
   private poolContracts: Map<string, ethers.Contract[]> = new Map();
   private volumeService: VolumeService;
 
-  // Bot configuration
   private minProfitThreshold: number = 1; // 1% minimum profit
   private tradeAmount: string = "1000000000000000000"; // 1 token
 
@@ -48,7 +48,7 @@ export class ArbitrageService {
   private ourTransactions: Set<string> = new Set();
   private ourAddresses: Set<string> = new Set();
 
-  // Rate limiting and cooldowns
+  // Rate limiting and cooldown
   private lastProcessedTime: number = 0;
   private processingCooldown: number = 1000; // 1 second cooldown
   private maxConcurrentArbitrages: number = 2;
@@ -199,7 +199,6 @@ export class ArbitrageService {
     try {
       // Always get fresh nonce from network
       const nonce = await this.refreshNonce(networkKey);
-      // Increment the nonce for next use
       this.nonceManagers.set(networkKey, nonce + 1);
       return nonce;
     } catch (error: any) {
@@ -498,7 +497,7 @@ export class ArbitrageService {
       // Track our transaction
       this.ourTransactions.add(swapTx.hash.toLowerCase());
 
-      const receipt = await swapTx.wait(1);
+      await swapTx.wait(1); // if not it won't work
       console.log(`✅ Trade executed successfully with nonce ${nonce}`);
 
       return {
@@ -646,7 +645,7 @@ export class ArbitrageService {
         network: opportunity.sellNetwork,
         minAmountOut: ethers.utils
           .parseUnits((0.95 * opportunity.sellPrice).toString(), 18)
-          .toString(), // 5% slippage
+          .toString(), // 5% slippage found in stackoverflow
       };
 
       const sellResult = await this.executeTrade(sellParams);
@@ -677,7 +676,7 @@ export class ArbitrageService {
       // Clean up completed/failed arbitrages after some time
       setTimeout(() => {
         this.currentArbitrages.delete(arbitrageId);
-      }, 300000); // 5 minutes
+      }, 5 * 60 * 1000);
     }
   }
 
@@ -757,7 +756,7 @@ export class ArbitrageService {
       });
     }
   }
-  // Add this method to process the event queue
+
   private async processEventQueue(): Promise<void> {
     if (this.isGloballyProcessing || this.eventQueue.length === 0) {
       return;
@@ -772,7 +771,7 @@ export class ArbitrageService {
         return;
       }
 
-      // Clear the queue since we're processing now
+      // cuz processing have to reset shit
       this.eventQueue = [];
 
       const timestamp = new Date().toLocaleString();
@@ -785,10 +784,9 @@ export class ArbitrageService {
       console.log(`👤 Sender: ${eventData.sender}`);
       console.log("=".repeat(60));
 
-      // Update last processed time
       this.lastProcessedTime = now;
 
-      // Scan for arbitrage opportunities
+      // And recan
       await this.scanAndExecute();
     } catch (error: any) {
       console.error(`❌ Error processing event queue: ${error.message}`);
@@ -799,7 +797,6 @@ export class ArbitrageService {
     }
   }
 
-  // Add this method to start the queue processor
   private startQueueProcessor(): void {
     // Process queue every few seconds if there are pending events
     setInterval(() => {
@@ -828,7 +825,6 @@ export class ArbitrageService {
       contracts.forEach((contract: ethers.Contract, index: number) => {
         console.log(`   Pool ${index + 1}: ${contract.address}`);
 
-        // Listen to Swap events
         contract.on(
           "Swap",
           (
@@ -979,10 +975,8 @@ export class ArbitrageService {
     console.log("=".repeat(60));
 
     try {
-      // Fetch real-time prices
       const prices = await this.fetchCoinGeckoPrices();
 
-      // Get quotes from both networks
       const [ethQuote, arbQuote] = await Promise.all([
         this.getQuote("ethereum"),
         this.getQuote("arbitrum"),
@@ -993,7 +987,6 @@ export class ArbitrageService {
         return;
       }
 
-      // Calculate arbitrage opportunity
       const opportunity = await this.calculateArbitrageOpportunity(
         ethQuote,
         arbQuote,
@@ -1063,7 +1056,6 @@ export class ArbitrageService {
     );
     console.log(`⏱️  Processing cooldown: ${this.processingCooldown}ms`);
 
-    // Setup event listeners
     this.setupEventListeners();
 
     console.log(`\n🎧 Bot is now listening for swap events...`);
@@ -1074,11 +1066,10 @@ export class ArbitrageService {
     console.log(`\n🔍 Performing initial arbitrage scan...`);
     await this.scanAndExecute();
 
-    // Keep the process alive
     console.log(`\n✅ Event listeners active. Bot is running...`);
     console.log(`Press Ctrl+C to stop the bot`);
 
-    // Handle graceful shutdown
+    // Handle graceful shutdown (chatgpt)
     process.on("SIGINT", () => {
       console.log(`\n\n🛑 Shutting down bot...`);
       this.cleanup();
@@ -1091,7 +1082,7 @@ export class ArbitrageService {
       process.exit(0);
     });
 
-    // Keep the process running
+    // forever runner
     return new Promise(() => {});
   }
 

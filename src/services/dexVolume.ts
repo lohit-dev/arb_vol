@@ -1,36 +1,5 @@
 import axios from "axios";
-
-interface DexScreenerResponse {
-  pairs: Array<{
-    chainId: string;
-    dexId: string;
-    url: string;
-    pairAddress: string;
-    baseToken: {
-      address: string;
-      name: string;
-      symbol: string;
-    };
-    quoteToken: {
-      address: string;
-      name: string;
-      symbol: string;
-    };
-    priceNative: string;
-    priceUsd: string;
-    volume: {
-      h24: number;
-      h6: number;
-      h1: number;
-      m5: number;
-    };
-    liquidity: {
-      usd: number;
-      base: number;
-      quote: number;
-    };
-  }>;
-}
+import { DexScreenerResponse } from "../types";
 
 class ExternalAPIVolumeTracker {
   async getDexScreenerVolume(

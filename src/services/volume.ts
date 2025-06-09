@@ -1,7 +1,8 @@
 import { ethers } from "ethers";
-import { VOLUME_CONFIG, NetworkConfig, TradeParams } from "../config/config";
+import { VOLUME_CONFIG } from "../config/config";
 import { ExternalAPIVolumeTracker } from "./dexVolume";
 import { POOL_ABI } from "../contracts/abi";
+import { NetworkConfig, TradeParams } from "../types";
 
 export class VolumeService {
   private externalVolumeTracker: ExternalAPIVolumeTracker =
@@ -44,7 +45,6 @@ export class VolumeService {
       const poolAddress = poolConfigs[0].address;
       const chainId = networkKey === "ethereum" ? "ethereum" : "arbitrum";
 
-      // Get volume from DEX Screener API with retry
       let externalVolume = 0;
       try {
         externalVolume = await this.externalVolumeTracker.getDexScreenerVolume(
@@ -64,7 +64,7 @@ export class VolumeService {
         return externalVolume;
       }
 
-      // Fallback to on-chain calculation
+      // Fallback to on-chain calculation, hope this never happens 🙏
       const network = this.networks.get(networkKey);
       if (!network) return 0;
 
@@ -99,7 +99,6 @@ export class VolumeService {
           parseFloat(ethers.utils.formatUnits(event.args.amount1, 18))
         );
 
-        // Use the larger of the two amounts for volume
         const largerAmount = Math.max(amount0, amount1);
         volume += largerAmount * prices.ethereum.usd;
       }
@@ -327,9 +326,8 @@ export class VolumeService {
       }
     }, VOLUME_CONFIG.checkInterval);
 
-    // Reset volumes daily with jitter
     setInterval(() => {
-      const jitter = Math.random() * 5 * 60 * 1000; // Random delay up to 5 minutes
+      const jitter = Math.random() * 5 * 60 * 1000; // 5 min
       setTimeout(() => {
         console.log(`🔄 Resetting daily volume counters`);
         for (const networkKey of this.networks.keys()) {
