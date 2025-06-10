@@ -35,11 +35,12 @@ export class ArbitrageService {
   private volumeService: VolumeService;
 
   private minProfitThreshold: number = 1; // 1% minimum profit
-  private tradeAmount: string = "1000000000000000000"; // 1 token
+  private seedTradeAmount: string = "1000000000000000000000"; // 1000 SEED tokens
+  private wethTradeAmount: string = "1000000000000000000"; // 1 WETH token
 
-  // Enhanced state management
+  // Sequential processing state
   private currentArbitrages: Map<string, PendingArbitrage> = new Map();
-  private isGloballyProcessing: boolean = false;
+  private isProcessingArbitrage: boolean = false;
   private eventQueue: SwapEventData[] = [];
   private processQueue: boolean = true;
   private maxQueueSize: number = 100;
@@ -47,11 +48,11 @@ export class ArbitrageService {
   // Tracking our own transactions to avoid infinite loops
   private ourTransactions: Set<string> = new Set();
   private ourAddresses: Set<string> = new Set();
+  private isGloballyProcessing: boolean = false;
 
   // Rate limiting and cooldown
   private lastProcessedTime: number = 0;
   private processingCooldown: number = 1000; // 1 second cooldown
-  private maxConcurrentArbitrages: number = 2;
 
   // Enhanced error handling
   private consecutiveErrors: number = 0;
@@ -59,14 +60,11 @@ export class ArbitrageService {
   private errorBackoffTime: number = 30000; // 30 seconds
   private lastErrorTime: number = 0;
 
-  // Nonce management
-  private nonceManagers: Map<string, number> = new Map();
-
   constructor(private privateKey?: string) {
+    privateKey = process.env.PRIVATE_KEY || privateKey;
     this.initializeNetworks();
     this.initializePoolConfigs();
     this.initializePoolContracts();
-    this.initializeNonceManagers();
 
     // Initialize volume service
     this.volumeService = new VolumeService(
@@ -163,52 +161,6 @@ export class ArbitrageService {
     }
   }
 
-  private async initializeNonceManagers(): Promise<void> {
-    try {
-      for (const [networkKey, network] of this.networks.entries()) {
-        if (network.wallet) {
-          const currentNonce = await network.wallet.getTransactionCount();
-          this.nonceManagers.set(networkKey, currentNonce);
-          console.log(`Initialized nonce for ${networkKey}: ${currentNonce}`);
-        }
-      }
-    } catch (error: any) {
-      console.error(`Failed to initialize nonces: ${error.message}`);
-    }
-  }
-
-  private async refreshNonce(networkKey: string): Promise<number> {
-    const network = this.networks.get(networkKey);
-    if (!network?.wallet) {
-      throw new Error(`Network ${networkKey} not configured with wallet`);
-    }
-
-    try {
-      const currentNonce = await network.wallet.getTransactionCount();
-      this.nonceManagers.set(networkKey, currentNonce);
-      return currentNonce;
-    } catch (error: any) {
-      console.error(
-        `Failed to refresh nonce for ${networkKey}: ${error.message}`
-      );
-      throw error;
-    }
-  }
-
-  private async getNextNonce(networkKey: string): Promise<number> {
-    try {
-      // Always get fresh nonce from network
-      const nonce = await this.refreshNonce(networkKey);
-      this.nonceManagers.set(networkKey, nonce + 1);
-      return nonce;
-    } catch (error: any) {
-      console.error(
-        `Failed to get next nonce for ${networkKey}: ${error.message}`
-      );
-      throw error;
-    }
-  }
-
   private async rotateApiKey(): Promise<string> {
     const currentKey =
       COINGECKO_CONFIG.apiKeys[COINGECKO_CONFIG.currentKeyIndex];
@@ -265,6 +217,36 @@ export class ArbitrageService {
       throw new Error("Failed to fetch prices");
     }
   }
+
+  private async calculateMinAmountOut(
+    networkKey: string,
+    tokenIn: string,
+    tokenOut: string,
+    amountIn: string,
+    fee: number,
+    slippagePercent: number = 5
+  ): Promise<string> {
+    const network = this.networks.get(networkKey);
+    if (!network) return "0";
+
+    try {
+      const quote = await network.quoter.callStatic.quoteExactInputSingle(
+        tokenIn,
+        tokenOut,
+        fee,
+        amountIn,
+        0
+      );
+
+      // Apply slippage tolerance
+      const minAmount = quote.mul(100 - slippagePercent).div(100);
+      return minAmount.toString();
+    } catch (error) {
+      console.error(`Failed to calculate min amount: ${error}`);
+      return "0"; // Accept any amount if calculation fails
+    }
+  }
+
   private async getPoolInfo(
     poolAddress: string,
     network: NetworkConfig
@@ -339,7 +321,7 @@ export class ArbitrageService {
           network.tokens.SEED.address,
           network.tokens.WETH.address,
           poolInfo.actualFee,
-          this.tradeAmount,
+          this.seedTradeAmount,
           0
         );
 
@@ -348,7 +330,7 @@ export class ArbitrageService {
           network.tokens.WETH.address,
           network.tokens.SEED.address,
           poolInfo.actualFee,
-          this.tradeAmount,
+          this.wethTradeAmount,
           0
         );
 
@@ -463,53 +445,63 @@ export class ArbitrageService {
       };
     }
 
-    try {
-      // Get fresh nonce before trade
-      const nonce = await this.getNextNonce(params.network.toLowerCase());
-      console.log(
-        `Executing trade with fresh nonce ${nonce} on ${params.network}`
+    const tokenContract = new ethers.Contract(
+      params.tokenIn,
+      ERC20_ABI,
+      network.wallet
+    );
+    const currentAllowance = await tokenContract.allowance(
+      network.wallet.address,
+      network.swapRouter.address
+    );
+    if (currentAllowance.lt(params.amountIn)) {
+      const approveTx = await tokenContract.approve(
+        network.swapRouter.address,
+        ethers.constants.MaxUint256
       );
+      await approveTx.wait();
+    }
+
+    try {
+      console.log(`Executing trade on ${params.network}...`);
 
       const swapParams = {
         tokenIn: params.tokenIn,
         tokenOut: params.tokenOut,
         fee: params.fee,
         recipient: network.wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 1800,
+        deadline: Math.floor(Date.now() / 1000) + 300,
         amountIn: params.amountIn,
         amountOutMinimum: params.minAmountOut,
         sqrtPriceLimitX96: 0,
       };
 
+      const gasPrice = await network.provider.getGasPrice();
+      console.log(
+        `Current gas price: ${ethers.utils.formatUnits(gasPrice, "gwei")} Gwei`
+      );
       const txOptions = {
-        gasLimit: 300000,
-        maxFeePerGas: ethers.utils.parseUnits("50", "gwei"),
-        maxPriorityFeePerGas: ethers.utils.parseUnits("2", "gwei"),
-        nonce: nonce,
+        gasLimit: 500000,
+        gasPrice: gasPrice.mul(110).div(100), // 10% above current gas
       };
 
       const swapTx = await network.swapRouter.exactInputSingle(
         swapParams,
         txOptions
       );
-      console.log(`Transaction hash: ${swapTx.hash} (nonce: ${nonce})`);
+      console.log(`Transaction hash: ${swapTx.hash}`);
 
       // Track our transaction
       this.ourTransactions.add(swapTx.hash.toLowerCase());
 
-      await swapTx.wait(1); // if not it won't work
-      console.log(`✅ Trade executed successfully with nonce ${nonce}`);
+      await swapTx.wait(1);
+      console.log(`✅ Trade executed successfully`);
 
       return {
         success: true,
         txHash: swapTx.hash,
       };
     } catch (error: any) {
-      // If nonce error occurs, refresh nonce cache
-      if (error.message.includes("nonce")) {
-        await this.refreshNonce(params.network.toLowerCase());
-      }
-
       const errorMessage = error.reason || error.message;
       const simpleError = errorMessage.split("(")[0].trim();
 
@@ -561,8 +553,9 @@ export class ArbitrageService {
 
       // Validate we have sufficient funds
       const requiredWeth = parseFloat(
-        ethers.utils.formatUnits(this.tradeAmount, 18)
+        ethers.utils.formatUnits(this.wethTradeAmount, 18)
       );
+
       if (parseFloat(buyNetworkBalances.weth) < requiredWeth) {
         throw new Error(
           `Insufficient WETH on ${opportunity.buyNetwork}. Have: ${buyNetworkBalances.weth}, Need: ${requiredWeth}`
@@ -585,14 +578,37 @@ export class ArbitrageService {
         throw new Error(`Invalid buy pool`);
       }
 
+      const expectedSeedOutput = await this.calculateMinAmountOut(
+        buyNetworkKey,
+        buyNetwork.tokens.WETH.address,
+        buyNetwork.tokens.SEED.address,
+        this.wethTradeAmount,
+        buyPoolInfo.actualFee!,
+        10 // 10% slippage tolerance
+      );
+
       const buyParams: TradeParams = {
         tokenIn: buyNetwork.tokens.WETH.address,
         tokenOut: buyNetwork.tokens.SEED.address,
         fee: buyPoolInfo.actualFee!,
-        amountIn: this.tradeAmount,
+        amountIn: this.wethTradeAmount,
         network: opportunity.buyNetwork,
-        minAmountOut: ethers.utils.parseUnits("0.95", 18).toString(),
+        minAmountOut: expectedSeedOutput,
       };
+
+      // Check if we actually have the tokens we're trying to trade
+      const tokenInContract = new ethers.Contract(
+        buyParams.tokenIn,
+        ERC20_ABI,
+        buyNetwork.provider
+      );
+
+      const actualBalance = await tokenInContract.balanceOf(
+        buyNetwork.wallet.address
+      );
+      if (actualBalance.lt(buyParams.amountIn)) {
+        throw new Error(`Insufficient ${buyParams.tokenIn} balance`);
+      }
 
       const buyResult = await this.executeTrade(buyParams);
       if (!buyResult.success) {
@@ -637,15 +653,22 @@ export class ArbitrageService {
         );
       }
 
+      const expectedWethOutput = await this.calculateMinAmountOut(
+        sellNetworkKey,
+        sellNetwork.tokens.SEED.address,
+        sellNetwork.tokens.WETH.address,
+        this.seedTradeAmount.toString(),
+        sellPoolInfo.actualFee!,
+        10 // 10% slippage tolerance
+      );
+
       const sellParams: TradeParams = {
         tokenIn: sellNetwork.tokens.SEED.address,
         tokenOut: sellNetwork.tokens.WETH.address,
         fee: sellPoolInfo.actualFee!,
-        amountIn: currentSeedBalance.toString(),
+        amountIn: this.seedTradeAmount.toString(),
         network: opportunity.sellNetwork,
-        minAmountOut: ethers.utils
-          .parseUnits((0.95 * opportunity.sellPrice).toString(), 18)
-          .toString(), // 5% slippage found in stackoverflow
+        minAmountOut: expectedWethOutput,
       };
 
       const sellResult = await this.executeTrade(sellParams);
@@ -690,119 +713,12 @@ export class ArbitrageService {
     );
   }
 
-  private shouldSkipProcessing(): boolean {
-    const now = Date.now();
-
-    // Skip if too many consecutive errors and in backoff period
-    if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
-      if (now - this.lastErrorTime < this.errorBackoffTime) {
-        console.log(
-          `⏸️ In error backoff period (${this.consecutiveErrors} consecutive errors)`
-        );
-        return true;
-      } else {
-        // Reset error count after backoff period
-        this.consecutiveErrors = 0;
-      }
-    }
-
-    // Skip if we have too many concurrent arbitrages
-    const activeArbitrages = Array.from(this.currentArbitrages.values()).filter(
-      (arb) => arb.status === "executing"
-    ).length;
-
-    if (activeArbitrages >= this.maxConcurrentArbitrages) {
-      console.log(`⏸️ Max concurrent arbitrages (${activeArbitrages}) reached`);
-      return true;
-    }
-
-    // Basic cooldown
-    if (now - this.lastProcessedTime < this.processingCooldown) {
-      return true;
-    }
-
-    return false;
-  }
-
-  // Fixed handleSwapEvent method
-  private async handleSwapEvent(eventData: SwapEventData): Promise<void> {
-    // Check if this is our own transaction to avoid processing our own swaps
-    // if (this.isOurTransaction(eventData)) {
-    //   console.log(
-    //     `⭐ Detected our own transaction: ${eventData.txHash} - skipping`
-    //   );
-    //   return;
-    // }
-
-    // Check if we should skip processing due to various conditions
-    if (this.shouldSkipProcessing()) {
-      return;
-    }
-
-    // Add to event queue if we're using queue processing
-    if (this.eventQueue.length >= this.maxQueueSize) {
-      console.log(
-        `⚠️ Event queue full (${this.maxQueueSize}), dropping oldest events`
-      );
-      this.eventQueue.shift();
-    }
-
-    this.eventQueue.push(eventData);
-
-    // If we're not globally processing and queue processing is enabled, trigger processing
-    if (!this.isGloballyProcessing && this.processQueue) {
-      this.processEventQueue().catch((error) => {
-        console.error(`❌ Error processing event queue: ${error.message}`);
-      });
-    }
-  }
-
-  private async processEventQueue(): Promise<void> {
-    if (this.isGloballyProcessing || this.eventQueue.length === 0) {
-      return;
-    }
-
-    this.isGloballyProcessing = true;
-    const now = Date.now();
-
-    try {
-      const eventData = this.eventQueue.pop();
-      if (!eventData) {
-        return;
-      }
-
-      // cuz processing have to reset shit
-      this.eventQueue = [];
-
-      const timestamp = new Date().toLocaleString();
-      console.log(`\n🔔 PROCESSING SWAP EVENT`);
-      console.log(`⏰ ${timestamp}`);
-      console.log(`🌐 Network: ${eventData.network}`);
-      console.log(`🏊 Pool: ${eventData.poolAddress}`);
-      console.log(`📋 Tx: ${eventData.txHash}`);
-      console.log(`#️⃣ Block: ${eventData.blockNumber}`);
-      console.log(`👤 Sender: ${eventData.sender}`);
-      console.log("=".repeat(60));
-
-      this.lastProcessedTime = now;
-
-      // And recan
-      await this.scanAndExecute();
-    } catch (error: any) {
-      console.error(`❌ Error processing event queue: ${error.message}`);
-      this.consecutiveErrors++;
-      this.lastErrorTime = Date.now();
-    } finally {
-      this.isGloballyProcessing = false;
-    }
-  }
-
   private startQueueProcessor(): void {
     // Process queue every few seconds if there are pending events
     setInterval(() => {
       if (
         this.eventQueue.length > 0 &&
-        !this.isGloballyProcessing &&
+        !this.isProcessingArbitrage &&
         this.processQueue
       ) {
         this.processEventQueue().catch((error) => {
@@ -930,7 +846,6 @@ export class ArbitrageService {
       console.error(`❌ Failed to reconnect ${networkKey}: ${error.message}`);
     }
   }
-
   private setupEventListenersForNetwork(networkKey: string): void {
     const contracts = this.poolContracts.get(networkKey);
     const network = this.networks.get(networkKey);
@@ -1039,15 +954,118 @@ export class ArbitrageService {
     }
   }
 
+  // Fixed handleSwapEvent method for sequential processing
+  private async handleSwapEvent(eventData: SwapEventData): Promise<void> {
+    // Check if this is our own transaction to avoid processing our own swaps
+    // if (this.isOurTransaction(eventData)) {
+    //   console.log(
+    //     `⭐ Detected our own transaction: ${eventData.txHash} - skipping`
+    //   );
+    //   return;
+    // }
+
+    // Check if we should skip processing due to various conditions
+    if (this.shouldSkipProcessing()) {
+      return;
+    }
+
+    // Add to event queue if we're using queue processing
+    if (this.eventQueue.length >= this.maxQueueSize) {
+      console.log(
+        `⚠️ Event queue full (${this.maxQueueSize}), dropping oldest events`
+      );
+      this.eventQueue.shift();
+    }
+
+    this.eventQueue.push(eventData);
+
+    // If we're not globally processing and queue processing is enabled, trigger processing
+    if (!this.isGloballyProcessing && this.processQueue) {
+      this.processEventQueue().catch((error) => {
+        console.error(`❌ Error processing event queue: ${error.message}`);
+      });
+    }
+  }
+
+  private async processEventQueue(): Promise<void> {
+    if (this.isGloballyProcessing || this.eventQueue.length === 0) {
+      return;
+    }
+
+    this.isGloballyProcessing = true;
+    const now = Date.now();
+
+    try {
+      const eventData = this.eventQueue.pop();
+      if (!eventData) {
+        return;
+      }
+
+      // Clear the queue as we're processing
+      this.eventQueue = [];
+
+      const timestamp = new Date().toLocaleString();
+      console.log(`\n🔔 PROCESSING SWAP EVENT`);
+      console.log(`⏰ ${timestamp}`);
+      console.log(`🌐 Network: ${eventData.network}`);
+      console.log(`🏊 Pool: ${eventData.poolAddress}`);
+      console.log(`📋 Tx: ${eventData.txHash}`);
+      console.log(`#️⃣ Block: ${eventData.blockNumber}`);
+      console.log(`👤 Sender: ${eventData.sender}`);
+      console.log("=".repeat(60));
+
+      this.lastProcessedTime = now;
+
+      // Scan and execute arbitrages sequentially
+      await this.scanAndExecute();
+    } catch (error: any) {
+      console.error(`❌ Error processing event queue: ${error.message}`);
+      this.consecutiveErrors++;
+      this.lastErrorTime = Date.now();
+    } finally {
+      this.isGloballyProcessing = false;
+    }
+  }
+
+  private shouldSkipProcessing(): boolean {
+    const now = Date.now();
+
+    // Skip if already processing (sequential execution)
+    if (this.isGloballyProcessing) {
+      console.log(`⏸️ Already processing, skipping...`);
+      return true;
+    }
+
+    // Skip if too many consecutive errors and in backoff period
+    if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
+      if (now - this.lastErrorTime < this.errorBackoffTime) {
+        console.log(
+          `⏸️ In error backoff period (${this.consecutiveErrors} consecutive errors)`
+        );
+        return true;
+      } else {
+        // Reset error count after backoff period
+        this.consecutiveErrors = 0;
+      }
+    }
+
+    // Basic cooldown
+    if (now - this.lastProcessedTime < this.processingCooldown) {
+      return true;
+    }
+
+    return false;
+  }
+
   async startEventListening(): Promise<void> {
     console.log(`\n🚀 STARTING EVENT-DRIVEN ARBITRAGE BOT`);
     console.log("=".repeat(60));
     console.log(`💰 Minimum profit threshold: ${this.minProfitThreshold}%`);
     console.log(
-      `🎯 Trade amount: ${ethers.utils.formatUnits(
-        this.tradeAmount,
+      `🎯 Trade amounts: ${ethers.utils.formatUnits(
+        this.seedTradeAmount,
         18
-      )} tokens`
+      )} SEED, ${ethers.utils.formatUnits(this.wethTradeAmount, 18)} WETH`
     );
     console.log(
       `${this.privateKey ? "✅" : "❌"} Trading ${
@@ -1055,6 +1073,7 @@ export class ArbitrageService {
       }`
     );
     console.log(`⏱️  Processing cooldown: ${this.processingCooldown}ms`);
+    console.log(`🔄 Sequential execution: ENABLED`);
 
     this.setupEventListeners();
 
@@ -1069,7 +1088,7 @@ export class ArbitrageService {
     console.log(`\n✅ Event listeners active. Bot is running...`);
     console.log(`Press Ctrl+C to stop the bot`);
 
-    // Handle graceful shutdown (chatgpt)
+    // Handle graceful shutdown
     process.on("SIGINT", () => {
       console.log(`\n\n🛑 Shutting down bot...`);
       this.cleanup();
@@ -1082,7 +1101,7 @@ export class ArbitrageService {
       process.exit(0);
     });
 
-    // forever runner
+    // Keep the process running
     return new Promise(() => {});
   }
 
@@ -1103,8 +1122,9 @@ export class ArbitrageService {
     this.minProfitThreshold = percentage;
   }
 
-  public setTradeAmount(amount: string): void {
-    this.tradeAmount = amount;
+  public setTradeAmounts(seedAmount: string, wethAmount: string): void {
+    this.seedTradeAmount = seedAmount;
+    this.wethTradeAmount = wethAmount;
   }
 
   public setProcessingCooldown(milliseconds: number): void {
@@ -1126,7 +1146,10 @@ export class ArbitrageService {
       isGloballyProcessing: this.isGloballyProcessing,
       lastProcessedTime: this.lastProcessedTime,
       minProfitThreshold: this.minProfitThreshold,
-      tradeAmount: ethers.utils.formatUnits(this.tradeAmount, 18),
+      tradeAmounts: {
+        seed: ethers.utils.formatUnits(this.seedTradeAmount, 18),
+        weth: ethers.utils.formatUnits(this.wethTradeAmount, 18),
+      },
       processingCooldown: this.processingCooldown,
       tradingEnabled: !!this.privateKey,
       networksConfigured: Array.from(this.networks.keys()),
@@ -1140,21 +1163,7 @@ export class ArbitrageService {
       eventQueueSize: this.eventQueue.length,
       consecutiveErrors: this.consecutiveErrors,
       currentArbitrages: this.currentArbitrages.size,
-      // Volume
-      // volumeTracking: {
-      //   targetVolume: VOLUME_CONFIG.targetVolume,
-      //   currentVolumes: Array.from(this.networkVolumes.entries()).map(
-      //     ([network, volume]) => ({
-      //       network,
-      //       volume: volume.toFixed(2),
-      //       percentage: ((volume / VOLUME_CONFIG.targetVolume) * 100).toFixed(
-      //         1
-      //       ),
-      //     })
-      //   ),
-      //   lastVolumeReset: new Date(this.lastVolumeReset).toLocaleString(),
-      //   rebalanceInProgress: Array.from(this.rebalanceInProgress.entries()),
-      // },
+      sequentialExecution: true,
     };
   }
 
