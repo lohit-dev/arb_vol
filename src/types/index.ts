@@ -148,4 +148,4 @@ export interface QueueService {
   isProcessingStopped(): boolean;
   shouldSkipProcessing(): boolean;
   setProcessingCooldown(milliseconds: number): void;
-} 
+}
