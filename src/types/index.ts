@@ -88,3 +88,64 @@ export interface DexScreenerResponse {
     };
   }>;
 }
+
+export interface TokenConfig {
+  chainId: number;
+  address: string;
+  decimals: number;
+  symbol: string;
+  name: string;
+}
+
+export interface PoolConfig {
+  address: string;
+}
+
+export interface Config {
+  networks: {
+    [key: string]: NetworkConfig;
+  };
+  tokens: {
+    [key: string]: {
+      [key: string]: TokenConfig;
+    };
+  };
+  poolConfigs: {
+    [key: string]: PoolConfig[];
+  };
+}
+
+export interface VolumeStatus {
+  targetVolume: number;
+  networkVolumes: [string, number][];
+  rebalanceInProgress: [string, boolean][];
+  lastVolumeReset: number;
+}
+
+export interface RebalanceResult {
+  success: boolean;
+  volumeGenerated: number;
+  attempts: number;
+}
+
+export interface SwapEventData {
+  network: string;
+  poolAddress: string;
+  txHash: string;
+  blockNumber: number;
+  amount0: ethers.BigNumber;
+  amount1: ethers.BigNumber;
+  sqrtPriceX96: ethers.BigNumber;
+  tick: number;
+  sender: string;
+}
+
+export interface QueueService {
+  addToQueue(eventData: SwapEventData): void;
+  processEventQueue(): Promise<void>;
+  getQueueSize(): number;
+  stopProcessing(): void;
+  isProcessingStopped(): boolean;
+  shouldSkipProcessing(): boolean;
+  setProcessingCooldown(milliseconds: number): void;
+} 

@@ -235,6 +235,19 @@ export class ArbitrageService {
       const buyNetworkKey = opportunity.buyNetwork.toLowerCase();
       const sellNetworkKey = opportunity.sellNetwork.toLowerCase();
 
+      // Get network configs
+      const buyNetwork = this.networks.get(buyNetworkKey);
+      const sellNetwork = this.networks.get(sellNetworkKey);
+
+      if (!buyNetwork || !sellNetwork) {
+        throw new Error(`Network configuration not found for ${buyNetworkKey} or ${sellNetworkKey}`);
+      }
+
+      // Check if wallets are initialized
+      if (!buyNetwork.wallet || !sellNetwork.wallet) {
+        throw new Error(`Wallet not initialized for ${buyNetworkKey} or ${sellNetworkKey}`);
+      }
+
       // Check balances
       const buyNetworkBalances = await this.tradeService.checkBalances(
         buyNetworkKey
@@ -263,7 +276,6 @@ export class ArbitrageService {
       }
 
       // Step 1: Buy SEED on the cheaper network
-      const buyNetwork = this.networks.get(buyNetworkKey);
       const buyPoolConfig = this.poolService
         .getPoolConfigs()
         .get(buyNetworkKey)?.[0];
@@ -324,7 +336,6 @@ export class ArbitrageService {
       await sleep(5000); // Wait 5 seconds for the buy transaction to confirm
 
       // Get current SEED balance to sell
-      const sellNetwork = this.networks.get(sellNetworkKey);
       const sellPoolConfig = this.poolService
         .getPoolConfigs()
         .get(sellNetworkKey)?.[0];
