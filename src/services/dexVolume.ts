@@ -1,6 +1,8 @@
 import axios from "axios";
 import { DexScreenerResponse } from "../types";
 
+// Made a separate file cuz in future if we want to change from dex screener to something else or use another this is helpful
+
 class ExternalAPIVolumeTracker {
   async getDexScreenerVolume(
     pairAddress: string,

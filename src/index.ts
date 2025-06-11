@@ -7,13 +7,11 @@ async function main(): Promise<void> {
   const bot = new ArbitrageService(privateKey);
 
   bot.setMinProfitThreshold(0.1);
-  // Set both SEED and WETH trade amounts
   bot.setTradeAmounts(
     "1000000000000000000000", // 1000 SEED tokens (18 decimals)
     "1000000000000000000" // 1 WETH (18 decimals)
   );
-  bot.setProcessingCooldown(2000); // 2 second cooldown between processing
-
+  bot.setProcessingCooldown(2000); // 2 seconds
   await bot.manualVolumeCheck();
 
   console.log(
