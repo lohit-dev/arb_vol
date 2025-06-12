@@ -27,6 +27,7 @@ export class ArbitrageService {
   private queueService: QueueService;
   private readonly notificationService: DiscordNotificationService;
 
+  private minPriceDeviationThreshold: number = 0.1;
   private minProfitThreshold: number = 1; // 1% minimum profit
   private seedTradeAmount: string = "1000000000000000000000"; // 1000 SEED tokens
   private wethTradeAmount: string = "1000000000000000000"; // 1 WETH token
@@ -42,6 +43,7 @@ export class ArbitrageService {
 
     // First, initialize NetworkService as it sets up the networks
     this.networkService = new NetworkService(
+      // @ts-ignore
       null, // We'll set this after QueueService is created
       null, // We'll set this after TradeService is created
       this.scanAndExecute.bind(this),
@@ -180,285 +182,326 @@ export class ArbitrageService {
       return null;
     }
 
-    // Calculate USD prices for SEED on each network
     const ethSeedUsdPrice = ethQuote.seedToWethRate * prices.ethereum.usd;
     const arbSeedUsdPrice = arbQuote.seedToWethRate * prices.ethereum.usd;
 
-    // Determine arbitrage direction
+    const priceDifference = Math.abs(ethSeedUsdPrice - arbSeedUsdPrice);
+    const averagePrice = (ethSeedUsdPrice + arbSeedUsdPrice) / 2;
+    const priceDeviationPercentage = (priceDifference / averagePrice) * 100;
+
     let buyNetwork, sellNetwork, buyPrice, sellPrice;
     if (ethSeedUsdPrice < arbSeedUsdPrice) {
-      buyNetwork = "Ethereum";
-      sellNetwork = "Arbitrum";
+      buyNetwork = "ethereum";
+      sellNetwork = "arbitrum";
       buyPrice = ethSeedUsdPrice;
       sellPrice = arbSeedUsdPrice;
     } else {
-      buyNetwork = "Arbitrum";
-      sellNetwork = "Ethereum";
+      buyNetwork = "arbitrum";
+      sellNetwork = "ethereum";
       buyPrice = arbSeedUsdPrice;
       sellPrice = ethSeedUsdPrice;
     }
-
-    const profitPercentage = ((sellPrice - buyPrice) / buyPrice) * 100;
-    const estimatedProfit = sellPrice - buyPrice;
-
-    // Estimate gas costs
-    const buyGasEstimate = buyNetwork === "Ethereum" ? 150000 : 80000;
-    const sellGasEstimate = sellNetwork === "Ethereum" ? 150000 : 80000;
-    const totalGasEstimate = buyGasEstimate + sellGasEstimate;
 
     return {
       buyNetwork,
       sellNetwork,
       buyPrice,
       sellPrice,
-      profitPercentage,
-      estimatedProfit,
-      gasEstimate: totalGasEstimate,
+      profitPercentage: priceDeviationPercentage, // Now represents price deviation
+      estimatedProfit: priceDifference, // Now represents absolute price difference
+      gasEstimate: 150000 + 80000, // Estimated gas for both trades,
+      tradeAmount: averagePrice,
     };
   }
 
-  private async executeArbitrage(
-    opportunity: ArbitrageOpportunity
-  ): Promise<boolean> {
-    const arbitrageId = `${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+  // private async calculateArbitrageOpportunity(
+  //   ethQuote: any,
+  //   arbQuote: any,
+  //   prices: any
+  // ): Promise<ArbitrageOpportunity | null> {
+  //   if (!ethQuote || !arbQuote || !prices.ethereum) {
+  //     return null;
+  //   }
 
-    console.log(`\n🚀 EXECUTING ARBITRAGE ${arbitrageId}`);
-    console.log(
-      `Buy ${opportunity.buyNetwork} → Sell ${opportunity.sellNetwork}`
-    );
-    console.log(`Expected profit: ${opportunity.profitPercentage.toFixed(2)}%`);
+  //   // Calculate USD prices for SEED on each network
+  //   const ethSeedUsdPrice = ethQuote.seedToWethRate * prices.ethereum.usd;
+  //   const arbSeedUsdPrice = arbQuote.seedToWethRate * prices.ethereum.usd;
 
-    // Create pending arbitrage record
-    const pendingArbitrage: PendingArbitrage = {
-      id: arbitrageId,
-      opportunity,
-      timestamp: Date.now(),
-      status: "executing",
-    };
+  //   // Determine arbitrage direction
+  //   let buyNetwork, sellNetwork, buyPrice, sellPrice;
+  //   if (ethSeedUsdPrice < arbSeedUsdPrice) {
+  //     buyNetwork = "Ethereum";
+  //     sellNetwork = "Arbitrum";
+  //     buyPrice = ethSeedUsdPrice;
+  //     sellPrice = arbSeedUsdPrice;
+  //   } else {
+  //     buyNetwork = "Arbitrum";
+  //     sellNetwork = "Ethereum";
+  //     buyPrice = arbSeedUsdPrice;
+  //     sellPrice = ethSeedUsdPrice;
+  //   }
 
-    this.currentArbitrages.set(arbitrageId, pendingArbitrage);
+  //   const profitPercentage = ((sellPrice - buyPrice) / buyPrice) * 100;
+  //   const estimatedProfit = sellPrice - buyPrice;
 
-    try {
-      const buyNetworkKey = opportunity.buyNetwork.toLowerCase();
-      const sellNetworkKey = opportunity.sellNetwork.toLowerCase();
+  //   // Estimate gas costs
+  //   const buyGasEstimate = buyNetwork === "Ethereum" ? 150000 : 80000;
+  //   const sellGasEstimate = sellNetwork === "Ethereum" ? 150000 : 80000;
+  //   const totalGasEstimate = buyGasEstimate + sellGasEstimate;
 
-      // Get network configs
-      const buyNetwork = this.networks.get(buyNetworkKey);
-      const sellNetwork = this.networks.get(sellNetworkKey);
+  //   return {
+  //     buyNetwork,
+  //     sellNetwork,
+  //     buyPrice,
+  //     sellPrice,
+  //     profitPercentage,
+  //     estimatedProfit,
+  //     gasEstimate: totalGasEstimate,
+  //   };
+  // }
 
-      if (!buyNetwork || !sellNetwork) {
-        throw new Error(
-          `Network configuration not found for ${buyNetworkKey} or ${sellNetworkKey}`
-        );
-      }
+  // private async executeArbitrage(
+  //   opportunity: ArbitrageOpportunity
+  // ): Promise<boolean> {
+  //   const arbitrageId = `${Date.now()}-${Math.random()
+  //     .toString(36)
+  //     .substr(2, 9)}`;
 
-      // Check if wallets are initialized
-      if (!buyNetwork.wallet || !sellNetwork.wallet) {
-        throw new Error(
-          `Wallet not initialized for ${buyNetworkKey} or ${sellNetworkKey}`
-        );
-      }
+  //   console.log(`\n🚀 EXECUTING ARBITRAGE ${arbitrageId}`);
+  //   console.log(
+  //     `Buy ${opportunity.buyNetwork} → Sell ${opportunity.sellNetwork}`
+  //   );
+  //   console.log(`Expected profit: ${opportunity.profitPercentage.toFixed(2)}%`);
 
-      // Check balances
-      const buyNetworkBalances = await this.tradeService.checkBalances(
-        buyNetworkKey
-      );
+  //   // Create pending arbitrage record
+  //   const pendingArbitrage: PendingArbitrage = {
+  //     id: arbitrageId,
+  //     opportunity,
+  //     timestamp: Date.now(),
+  //     status: "executing",
+  //   };
 
-      const sellNetworkBalances = await this.tradeService.checkBalances(
-        sellNetworkKey
-      );
+  //   this.currentArbitrages.set(arbitrageId, pendingArbitrage);
 
-      console.log(`\nBalances before arbitrage:`);
-      console.log(
-        `${opportunity.buyNetwork}: ${buyNetworkBalances.seed} SEED, ${buyNetworkBalances.weth} WETH`
-      );
-      console.log(
-        `${opportunity.sellNetwork}: ${sellNetworkBalances.seed} SEED, ${sellNetworkBalances.weth} WETH`
-      );
+  //   try {
+  //     const buyNetworkKey = opportunity.buyNetwork.toLowerCase();
+  //     const sellNetworkKey = opportunity.sellNetwork.toLowerCase();
 
-      // Validate we have sufficient funds
-      const requiredWeth = parseFloat(
-        ethers.utils.formatUnits(this.wethTradeAmount, 18)
-      );
+  //     // Get network configs
+  //     const buyNetwork = this.networks.get(buyNetworkKey);
+  //     const sellNetwork = this.networks.get(sellNetworkKey);
 
-      if (parseFloat(buyNetworkBalances.weth) < requiredWeth) {
-        await this.notificationService.sendNotification({
-          type: "LOW_BALANCE",
-          network: opportunity.buyNetwork,
-          balances: {
-            WETH: {
-              amount: buyNetworkBalances.weth,
-            },
-          },
-        });
-        throw new Error(
-          `Insufficient WETH on ${opportunity.buyNetwork}. Have: ${buyNetworkBalances.weth}, Need: ${requiredWeth}`
-        );
-      }
+  //     if (!buyNetwork || !sellNetwork) {
+  //       throw new Error(
+  //         `Network configuration not found for ${buyNetworkKey} or ${sellNetworkKey}`
+  //       );
+  //     }
 
-      // Step 1: Buy SEED on the cheaper network
-      const buyPoolConfig = this.poolService
-        .getPoolConfigs()
-        .get(buyNetworkKey)?.[0];
+  //     // Check if wallets are initialized
+  //     if (!buyNetwork.wallet || !sellNetwork.wallet) {
+  //       throw new Error(
+  //         `Wallet not initialized for ${buyNetworkKey} or ${sellNetworkKey}`
+  //       );
+  //     }
 
-      if (!buyNetwork || !buyPoolConfig) {
-        throw new Error(`Buy network configuration not found`);
-      }
+  //     // Check balances
+  //     const buyNetworkBalances = await this.tradeService.checkBalances(
+  //       buyNetworkKey
+  //     );
 
-      const buyPoolInfo = await this.poolService.getPoolInfo(
-        buyPoolConfig.address,
-        buyNetwork
-      );
-      if (!buyPoolInfo.isValid) {
-        throw new Error(`Invalid buy pool`);
-      }
+  //     const sellNetworkBalances = await this.tradeService.checkBalances(
+  //       sellNetworkKey
+  //     );
 
-      const expectedSeedOutput = await this.calculateMinAmountOut(
-        buyNetworkKey,
-        buyNetwork.tokens.WETH.address,
-        buyNetwork.tokens.SEED.address,
-        this.wethTradeAmount,
-        buyPoolInfo.actualFee!,
-        10 // 10% slippage tolerance
-      );
+  //     console.log(`\nBalances before arbitrage:`);
+  //     console.log(
+  //       `${opportunity.buyNetwork}: ${buyNetworkBalances.seed} SEED, ${buyNetworkBalances.weth} WETH`
+  //     );
+  //     console.log(
+  //       `${opportunity.sellNetwork}: ${sellNetworkBalances.seed} SEED, ${sellNetworkBalances.weth} WETH`
+  //     );
 
-      const buyParams: TradeParams = {
-        tokenIn: buyNetwork.tokens.WETH.address,
-        tokenOut: buyNetwork.tokens.SEED.address,
-        fee: buyPoolInfo.actualFee!,
-        amountIn: this.wethTradeAmount,
-        network: opportunity.buyNetwork,
-        minAmountOut: expectedSeedOutput,
-      };
+  //     // Validate we have sufficient funds
+  //     const requiredWeth = parseFloat(
+  //       ethers.utils.formatUnits(this.wethTradeAmount, 18)
+  //     );
 
-      // Check if we actually have the tokens we're trying to trade
-      const tokenInContract = new ethers.Contract(
-        buyParams.tokenIn,
-        ERC20_ABI,
-        buyNetwork.provider
-      );
+  //     if (parseFloat(buyNetworkBalances.weth) < requiredWeth) {
+  //       await this.notificationService.sendNotification({
+  //         type: "LOW_BALANCE",
+  //         network: opportunity.buyNetwork,
+  //         balances: {
+  //           WETH: {
+  //             amount: buyNetworkBalances.weth,
+  //           },
+  //         },
+  //       });
+  //       throw new Error(
+  //         `Insufficient WETH on ${opportunity.buyNetwork}. Have: ${buyNetworkBalances.weth}, Need: ${requiredWeth}`
+  //       );
+  //     }
 
-      const actualBalance = await tokenInContract.balanceOf(
-        buyNetwork.wallet.address
-      );
+  //     // Step 1: Buy SEED on the cheaper network
+  //     const buyPoolConfig = this.poolService
+  //       .getPoolConfigs()
+  //       .get(buyNetworkKey)?.[0];
 
-      if (actualBalance.lt(buyParams.amountIn)) {
-        await this.notificationService.sendNotification({
-          type: "LOW_BALANCE",
-          network: buyNetwork,
-          balances: {
-            WETH: {
-              amount: actualBalance,
-            },
-          },
-        });
-        throw new Error(`Insufficient ${buyParams.tokenIn} balance`);
-      }
+  //     if (!buyNetwork || !buyPoolConfig) {
+  //       throw new Error(`Buy network configuration not found`);
+  //     }
 
-      const buyResult = await this.tradeService.executeTrade(buyParams);
-      if (!buyResult.success) {
-        throw new Error(`Buy trade failed: ${buyResult.error}`);
-      }
+  //     const buyPoolInfo = await this.poolService.getPoolInfo(
+  //       buyPoolConfig.address,
+  //       buyNetwork
+  //     );
+  //     if (!buyPoolInfo.isValid) {
+  //       throw new Error(`Invalid buy pool`);
+  //     }
 
-      pendingArbitrage.buyTxHash = buyResult.txHash;
-      pendingArbitrage.status = "executing";
+  //     const expectedSeedOutput = await this.calculateMinAmountOut(
+  //       buyNetworkKey,
+  //       buyNetwork.tokens.WETH.address,
+  //       buyNetwork.tokens.SEED.address,
+  //       this.wethTradeAmount,
+  //       buyPoolInfo.actualFee!,
+  //       0.25
+  //     );
 
-      // Wait for the transaction to settle and get updated SEED balance
-      await sleep(5000); // Wait 5 seconds for the buy transaction to confirm
+  //     const buyParams: TradeParams = {
+  //       tokenIn: buyNetwork.tokens.WETH.address,
+  //       tokenOut: buyNetwork.tokens.SEED.address,
+  //       fee: buyPoolInfo.actualFee!,
+  //       amountIn: this.wethTradeAmount,
+  //       network: opportunity.buyNetwork,
+  //       minAmountOut: expectedSeedOutput,
+  //     };
 
-      // Get current SEED balance to sell
-      const sellPoolConfig = this.poolService
-        .getPoolConfigs()
-        .get(sellNetworkKey)?.[0];
+  //     // Check if we actually have the tokens we're trying to trade
+  //     const tokenInContract = new ethers.Contract(
+  //       buyParams.tokenIn,
+  //       ERC20_ABI,
+  //       buyNetwork.provider
+  //     );
 
-      if (!sellNetwork || !sellPoolConfig) {
-        throw new Error(`Sell network configuration not found`);
-      }
+  //     const actualBalance = await tokenInContract.balanceOf(
+  //       buyNetwork.wallet.address
+  //     );
 
-      const sellPoolInfo = await this.poolService.getPoolInfo(
-        sellPoolConfig.address,
-        sellNetwork
-      );
-      if (!sellPoolInfo.isValid) {
-        throw new Error(`Invalid sell pool`);
-      }
+  //     if (actualBalance.lt(buyParams.amountIn)) {
+  //       await this.notificationService.sendNotification({
+  //         type: "LOW_BALANCE",
+  //         network: buyNetwork,
+  //         balances: {
+  //           WETH: {
+  //             amount: actualBalance,
+  //           },
+  //         },
+  //       });
+  //       throw new Error(`Insufficient ${buyParams.tokenIn} balance`);
+  //     }
 
-      const seedContract = new ethers.Contract(
-        sellNetwork.tokens.SEED.address,
-        ERC20_ABI,
-        sellNetwork.provider
-      );
+  //     const buyResult = await this.tradeService.executeTrade(buyParams);
+  //     if (!buyResult.success) {
+  //       throw new Error(`Buy trade failed: ${buyResult.error}`);
+  //     }
 
-      const currentSeedBalance = await seedContract.balanceOf(
-        sellNetwork.wallet!.address
-      );
+  //     pendingArbitrage.buyTxHash = buyResult.txHash;
+  //     pendingArbitrage.status = "executing";
 
-      if (currentSeedBalance.eq(0)) {
-        await this.notificationService.sendNotification({
-          type: "LOW_BALANCE",
-          network: sellNetwork,
-          balances: {
-            SEED: {
-              amount: currentSeedBalance,
-            },
-          },
-        });
-        throw new Error(
-          `No SEED balance available to sell on ${opportunity.sellNetwork}`
-        );
-      }
+  //     // Wait for the transaction to settle and get updated SEED balance
+  //     await sleep(5000); // Wait 5 seconds for the buy transaction to confirm
 
-      const expectedWethOutput = await this.calculateMinAmountOut(
-        sellNetworkKey,
-        sellNetwork.tokens.SEED.address,
-        sellNetwork.tokens.WETH.address,
-        this.seedTradeAmount.toString(),
-        sellPoolInfo.actualFee!,
-        10 // 10% slippage tolerance
-      );
+  //     // Get current SEED balance to sell
+  //     const sellPoolConfig = this.poolService
+  //       .getPoolConfigs()
+  //       .get(sellNetworkKey)?.[0];
 
-      const sellParams: TradeParams = {
-        tokenIn: sellNetwork.tokens.SEED.address,
-        tokenOut: sellNetwork.tokens.WETH.address,
-        fee: sellPoolInfo.actualFee!,
-        amountIn: this.seedTradeAmount.toString(),
-        network: opportunity.sellNetwork,
-        minAmountOut: expectedWethOutput,
-      };
+  //     if (!sellNetwork || !sellPoolConfig) {
+  //       throw new Error(`Sell network configuration not found`);
+  //     }
 
-      const sellResult = await this.tradeService.executeTrade(sellParams);
-      if (!sellResult.success) {
-        throw new Error(`Sell trade failed: ${sellResult.error}`);
-      }
+  //     const sellPoolInfo = await this.poolService.getPoolInfo(
+  //       sellPoolConfig.address,
+  //       sellNetwork
+  //     );
+  //     if (!sellPoolInfo.isValid) {
+  //       throw new Error(`Invalid sell pool`);
+  //     }
 
-      pendingArbitrage.sellTxHash = sellResult.txHash;
-      pendingArbitrage.status = "completed";
+  //     const seedContract = new ethers.Contract(
+  //       sellNetwork.tokens.SEED.address,
+  //       ERC20_ABI,
+  //       sellNetwork.provider
+  //     );
 
-      console.log(`✅ ARBITRAGE ${arbitrageId} COMPLETED SUCCESSFULLY`);
+  //     const currentSeedBalance = await seedContract.balanceOf(
+  //       sellNetwork.wallet!.address
+  //     );
 
-      // Reset consecutive errors on success
-      this.queueService.resetErrors();
+  //     if (currentSeedBalance.eq(0)) {
+  //       await this.notificationService.sendNotification({
+  //         type: "LOW_BALANCE",
+  //         network: sellNetwork,
+  //         balances: {
+  //           SEED: {
+  //             amount: currentSeedBalance,
+  //           },
+  //         },
+  //       });
+  //       throw new Error(
+  //         `No SEED balance available to sell on ${opportunity.sellNetwork}`
+  //       );
+  //     }
 
-      return true;
-    } catch (error: any) {
-      console.error(
-        `❌ Arbitrage ${arbitrageId} execution failed: ${error.message}`
-      );
-      pendingArbitrage.status = "failed";
+  //     const expectedWethOutput = await this.calculateMinAmountOut(
+  //       sellNetworkKey,
+  //       sellNetwork.tokens.SEED.address,
+  //       sellNetwork.tokens.WETH.address,
+  //       this.seedTradeAmount.toString(),
+  //       sellPoolInfo.actualFee!,
+  //       0.25
+  //     );
 
-      // Track error using queue service
-      this.queueService.trackError();
+  //     const sellParams: TradeParams = {
+  //       tokenIn: sellNetwork.tokens.SEED.address,
+  //       tokenOut: sellNetwork.tokens.WETH.address,
+  //       fee: sellPoolInfo.actualFee!,
+  //       amountIn: this.seedTradeAmount.toString(),
+  //       network: opportunity.sellNetwork,
+  //       minAmountOut: expectedWethOutput,
+  //     };
 
-      return false;
-    } finally {
-      // Clean up completed/failed arbitrages after some time
-      setTimeout(() => {
-        this.currentArbitrages.delete(arbitrageId);
-      }, 5 * 60 * 1000);
-    }
-  }
+  //     const sellResult = await this.tradeService.executeTrade(sellParams);
+  //     if (!sellResult.success) {
+  //       throw new Error(`Sell trade failed: ${sellResult.error}`);
+  //     }
+
+  //     pendingArbitrage.sellTxHash = sellResult.txHash;
+  //     pendingArbitrage.status = "completed";
+
+  //     console.log(`✅ ARBITRAGE ${arbitrageId} COMPLETED SUCCESSFULLY`);
+
+  //     // Reset consecutive errors on success
+  //     this.queueService.resetErrors();
+
+  //     return true;
+  //   } catch (error: any) {
+  //     console.error(
+  //       `❌ Arbitrage ${arbitrageId} execution failed: ${error.message}`
+  //     );
+  //     pendingArbitrage.status = "failed";
+
+  //     // Track error using queue service
+  //     this.queueService.trackError();
+
+  //     return false;
+  //   } finally {
+  //     // Clean up completed/failed arbitrages after some time
+  //     setTimeout(() => {
+  //       this.currentArbitrages.delete(arbitrageId);
+  //     }, 5 * 60 * 1000);
+  //   }
+  // }
 
   public setProcessingCooldown(milliseconds: number): void {
     this.queueService.setProcessingCooldown(milliseconds);
@@ -500,13 +543,86 @@ export class ArbitrageService {
   //   };
   // }
 
+  // async scanAndExecute(): Promise<void> {
+  //   console.log(`\n🔍 SCANNING FOR ARBITRAGE OPPORTUNITIES`);
+  //   console.log("=".repeat(60));
+
+  //   try {
+  //     const prices = await this.fetchCoinGeckoPrices();
+
+  //     const [ethQuote, arbQuote] = await Promise.all([
+  //       this.getQuote("ethereum"),
+  //       this.getQuote("arbitrum"),
+  //     ]);
+
+  //     if (!ethQuote || !arbQuote) {
+  //       console.log("❌ Failed to get quotes from both networks");
+  //       return;
+  //     }
+
+  //     const opportunity = await this.calculateArbitrageOpportunity(
+  //       ethQuote,
+  //       arbQuote,
+  //       prices
+  //     );
+
+  //     if (!opportunity) {
+  //       console.log("❌ No arbitrage opportunity found");
+  //       return;
+  //     }
+
+  //     console.log(`\n📊 ARBITRAGE OPPORTUNITY FOUND`);
+  //     console.log(
+  //       `Buy on: ${opportunity.buyNetwork} at ${opportunity.buyPrice.toFixed(
+  //         6
+  //       )}`
+  //     );
+  //     console.log(
+  //       `Sell on: ${opportunity.sellNetwork} at ${opportunity.sellPrice.toFixed(
+  //         6
+  //       )}`
+  //     );
+  //     console.log(
+  //       `Profit: ${opportunity.profitPercentage.toFixed(
+  //         2
+  //       )}% (${opportunity.estimatedProfit.toFixed(6)})`
+  //     );
+
+  //     if (opportunity.profitPercentage >= this.minProfitThreshold) {
+  //       if (this.privateKey) {
+  //         console.log(`\n🎯 Profit threshold met! Executing arbitrage...`);
+  //         await this.executeArbitrage(opportunity);
+  //       } else {
+  //         console.log(
+  //           `\n⚠️  Profitable opportunity found but no private key provided for trading`
+  //         );
+  //         console.log(
+  //           `   Add private key to constructor to enable automatic trading`
+  //         );
+  //       }
+  //     } else {
+  //       console.log(
+  //         `\n💤 Profit ${opportunity.profitPercentage.toFixed(
+  //           2
+  //         )}% below threshold ${this.minProfitThreshold}%`
+  //       );
+  //     }
+  //   } catch (error: any) {
+  //     await this.notificationService.sendCustomMessage(
+  //       "❌ Scan Error",
+  //       `Error during arbitrage scan: ${error.message}`,
+  //       0xff0000
+  //     );
+  //     console.error(`❌ Scan failed: ${error.message}`);
+  //   }
+  // }
+
   async scanAndExecute(): Promise<void> {
-    console.log(`\n🔍 SCANNING FOR ARBITRAGE OPPORTUNITIES`);
+    console.log(`\n🔍 SCANNING FOR PRICE IMBALANCES`);
     console.log("=".repeat(60));
 
     try {
       const prices = await this.fetchCoinGeckoPrices();
-
       const [ethQuote, arbQuote] = await Promise.all([
         this.getQuote("ethereum"),
         this.getQuote("arbitrum"),
@@ -524,55 +640,113 @@ export class ArbitrageService {
       );
 
       if (!opportunity) {
-        console.log("❌ No arbitrage opportunity found");
+        console.log("❌ No price data available");
         return;
       }
 
-      console.log(`\n📊 ARBITRAGE OPPORTUNITY FOUND`);
+      console.log(`\n📊 PRICE ANALYSIS`);
       console.log(
-        `Buy on: ${opportunity.buyNetwork} at ${opportunity.buyPrice.toFixed(
+        `${opportunity.buyNetwork.toUpperCase()}: $${opportunity.buyPrice.toFixed(
           6
         )}`
       );
       console.log(
-        `Sell on: ${opportunity.sellNetwork} at ${opportunity.sellPrice.toFixed(
+        `${opportunity.sellNetwork.toUpperCase()}: $${opportunity.sellPrice.toFixed(
           6
         )}`
       );
       console.log(
-        `Profit: ${opportunity.profitPercentage.toFixed(
-          2
-        )}% (${opportunity.estimatedProfit.toFixed(6)})`
+        `Price deviation: ${opportunity.profitPercentage.toFixed(2)}%`
       );
 
-      if (opportunity.profitPercentage >= this.minProfitThreshold) {
+      // Modified threshold logic - now checking for price deviation instead of profit
+      if (opportunity.profitPercentage >= this.minPriceDeviationThreshold) {
         if (this.privateKey) {
-          console.log(`\n🎯 Profit threshold met! Executing arbitrage...`);
-          await this.executeArbitrage(opportunity);
+          console.log(
+            `\n⚖️ Price imbalance detected! Executing equilibrium trade...`
+          );
+          await this.tradeService.executeEquilibriumTrade(opportunity);
         } else {
-          console.log(
-            `\n⚠️  Profitable opportunity found but no private key provided for trading`
-          );
-          console.log(
-            `   Add private key to constructor to enable automatic trading`
-          );
+          console.log(`\n⚠️ Price imbalance found but no private key provided`);
         }
       } else {
         console.log(
-          `\n💤 Profit ${opportunity.profitPercentage.toFixed(
+          `\n✅ Prices are balanced (${opportunity.profitPercentage.toFixed(
             2
-          )}% below threshold ${this.minProfitThreshold}%`
+          )}% < ${this.minPriceDeviationThreshold}% threshold)`
         );
       }
     } catch (error: any) {
-      await this.notificationService.sendCustomMessage(
-        "❌ Scan Error",
-        `Error during arbitrage scan: ${error.message}`,
-        0xff0000
-      );
       console.error(`❌ Scan failed: ${error.message}`);
     }
   }
+
+  // async scanAndExecute(): Promise<void> {
+  //   console.log(`\n🔍 SCANNING FOR PRICE IMBALANCES`);
+  //   console.log("=".repeat(60));
+
+  //   try {
+  //     const prices = await this.fetchCoinGeckoPrices();
+  //     const [ethQuote, arbQuote] = await Promise.all([
+  //       this.getQuote("ethereum"),
+  //       this.getQuote("arbitrum"),
+  //     ]);
+
+  //     if (!ethQuote || !arbQuote) {
+  //       console.log("❌ Failed to get quotes from both networks");
+  //       return;
+  //     }
+
+  //     const opportunity = await this.calculateArbitrageOpportunity(
+  //       ethQuote,
+  //       arbQuote,
+  //       prices
+  //     );
+
+  //     if (!opportunity) {
+  //       console.log("❌ No price data available");
+  //       return;
+  //     }
+
+  //     console.log(`\n📊 PRICE ANALYSIS`);
+  //     console.log(
+  //       `${opportunity.buyNetwork.toUpperCase()}: $${opportunity.buyPrice.toFixed(
+  //         6
+  //       )}`
+  //     );
+  //     console.log(
+  //       `${opportunity.sellNetwork.toUpperCase()}: $${opportunity.sellPrice.toFixed(
+  //         6
+  //       )}`
+  //     );
+  //     console.log(
+  //       `Price deviation: ${opportunity.profitPercentage.toFixed(2)}%`
+  //     );
+  //     console.log(
+  //       `Absolute difference: $${opportunity.estimatedProfit.toFixed(6)}`
+  //     );
+
+  //     // Changed threshold logic - now checking for price deviation instead of profit
+  //     if (opportunity.profitPercentage >= this.minProfitThreshold) {
+  //       if (this.privateKey) {
+  //         console.log(
+  //           `\n⚖️ Price imbalance detected! Executing equilibrium trade...`
+  //         );
+  //         await this.tradeService.executeEquilibriumTrade(opportunity);
+  //       } else {
+  //         console.log(`\n⚠️ Price imbalance found but no private key provided`);
+  //       }
+  //     } else {
+  //       console.log(
+  //         `\n✅ Prices are balanced (${opportunity.profitPercentage.toFixed(
+  //           2
+  //         )}% deviation < ${this.minProfitThreshold}% threshold)`
+  //       );
+  //     }
+  //   } catch (error: any) {
+  //     console.error(`❌ Scan failed: ${error.message}`);
+  //   }
+  // }
 
   public async manualVolumeCheck(): Promise<void> {
     await this.volumeService.manualVolumeCheck();
@@ -580,6 +754,10 @@ export class ArbitrageService {
 
   public getVolumeStatus(): object {
     return this.volumeService.getVolumeStatus();
+  }
+
+  public setMinPriceDeviationThreshold(deviation: number) {
+    this.minPriceDeviationThreshold = deviation;
   }
 
   public async manualScan(): Promise<void> {

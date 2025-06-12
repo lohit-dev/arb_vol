@@ -13,6 +13,7 @@ async function main(): Promise<void> {
   await notificationService.sendStartupNotification(bot.getWalletAddress());
 
   bot.setMinProfitThreshold(0.1);
+  bot.setMinPriceDeviationThreshold(0.5);
   bot.setTradeAmounts(
     "1000000000000000000000", // 1000 SEED tokens (18 decimals)
     "1000000000000000000" // 1 WETH (18 decimals)

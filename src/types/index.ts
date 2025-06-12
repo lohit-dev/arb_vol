@@ -25,6 +25,7 @@ export interface ArbitrageOpportunity {
   profitPercentage: number;
   estimatedProfit: number;
   gasEstimate: number;
+  tradeAmount: number;
 }
 
 export interface TradeParams {

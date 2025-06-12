@@ -52,6 +52,7 @@ export class PoolService {
     token0?: string;
     token1?: string;
     token0IsSeed?: boolean;
+    liquidity?: ethers.BigNumber;
   }> {
     try {
       const poolContract = new ethers.Contract(
@@ -84,6 +85,7 @@ export class PoolService {
         token0,
         token1,
         token0IsSeed: token0Lower === seedLower,
+        liquidity,
       };
     } catch (error: any) {
       return { isValid: false };

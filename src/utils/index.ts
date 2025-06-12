@@ -49,3 +49,13 @@ export function generateRandomTradeAmount(
 export async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export function usdToWeth(usdAmount: number, ethPrice: number): string {
+  const ethAmount = usdAmount / ethPrice;
+  return ethers.utils.parseUnits(ethAmount.toFixed(18), 18).toString();
+}
+
+export function usdToSeed(usdAmount: number, seedPrice: number): string {
+  const seedAmount = usdAmount / seedPrice;
+  return ethers.utils.parseUnits(seedAmount.toFixed(18), 18).toString();
+}
