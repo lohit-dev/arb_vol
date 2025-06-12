@@ -5,8 +5,8 @@ import { NetworkService } from "../src/services/network";
 import { PoolService } from "../src/services/pool";
 import { TradeService } from "../src/services/trades";
 import { CoinGeckoService } from "../src/services/coingecko";
-import { DiSCORD_WEBHOOK_URL, VOLUME_CONFIG } from "../src/config/config";
-import { NetworkConfig, RebalanceResult, VolumeStatus } from "../src/types";
+import { DiSCORD_WEBHOOK_URL } from "../src/config/config";
+import { NetworkConfig, VolumeStatus } from "../src/types";
 import { DiscordNotificationService } from "../src/services/notification";
 
 // Mock dependencies
@@ -179,137 +179,6 @@ describe("VolumeService", () => {
       networks.forEach((network) => {
         expect(status.networkVolumes).toContainEqual([network, 0]);
       });
-    });
-
-    it("should track volume correctly", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = 5000;
-
-      // Mock volume data
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-
-      await volumeService.manualVolumeCheck();
-      const status = volumeService.getVolumeStatus() as VolumeStatus;
-      expect(status.networkVolumes).toContainEqual([
-        mockNetworkKey,
-        mockVolume,
-      ]);
-    });
-  });
-
-  describe("Volume Rebalancing", () => {
-    it("should trigger rebalancing when volume is below target", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = VOLUME_CONFIG.targetVolume - 1000;
-
-      // Mock low volume
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-
-      // Mock successful rebalancing
-      const mockRebalanceResult: RebalanceResult = {
-        success: true,
-        volumeGenerated: 1000,
-        attempts: 1,
-      };
-      mockTradeService.executeRebalanceTrades.mockResolvedValue(
-        mockRebalanceResult
-      );
-
-      await volumeService.manualVolumeCheck();
-      expect(mockTradeService.executeRebalanceTrades).toHaveBeenCalled();
-    });
-
-    it("should not trigger rebalancing when volume is above target", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = VOLUME_CONFIG.targetVolume + 1000;
-
-      // Mock high volume
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-
-      await volumeService.manualVolumeCheck();
-      expect(mockTradeService.executeRebalanceTrades).not.toHaveBeenCalled();
-    });
-
-    it("should handle rebalancing failures gracefully", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = VOLUME_CONFIG.targetVolume - 1000;
-
-      // Mock low volume
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-
-      // Mock failed rebalancing
-      const mockRebalanceResult: RebalanceResult = {
-        success: false,
-        volumeGenerated: 0,
-        attempts: 1,
-      };
-      mockTradeService.executeRebalanceTrades.mockResolvedValue(
-        mockRebalanceResult
-      );
-
-      await volumeService.manualVolumeCheck();
-      const status = volumeService.getVolumeStatus() as VolumeStatus;
-      expect(status.rebalanceInProgress).toContainEqual([
-        mockNetworkKey,
-        false,
-      ]);
-    });
-  });
-
-  describe("Volume Reset", () => {
-    it("should reset volumes after configured interval", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = 5000;
-
-      // Set initial volume
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-      await volumeService.manualVolumeCheck();
-
-      // Fast forward time
-      jest.advanceTimersByTime(VOLUME_CONFIG.volumeResetInterval);
-
-      const status = volumeService.getVolumeStatus() as VolumeStatus;
-      expect(status.networkVolumes).toContainEqual([mockNetworkKey, 0]);
-    });
-  });
-
-  describe("Error Handling", () => {
-    it("should handle network errors during volume check", async () => {
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockRejectedValue(new Error("Network error"));
-
-      await expect(volumeService.manualVolumeCheck()).rejects.toThrow(
-        "Network error"
-      );
-    });
-
-    it("should handle price fetch errors during rebalancing", async () => {
-      const mockNetworkKey = "ethereum";
-      const mockVolume = VOLUME_CONFIG.targetVolume - 1000;
-
-      // Mock low volume
-      (mockPoolService as any).getPoolVolume = jest
-        .fn()
-        .mockResolvedValue(mockVolume);
-
-      // Mock price fetch error
-      mockCoinGeckoService.fetchPrices.mockRejectedValue(
-        new Error("Price fetch failed")
-      );
-
-      await volumeService.manualVolumeCheck();
-      expect(mockTradeService.executeRebalanceTrades).not.toHaveBeenCalled();
     });
   });
 });

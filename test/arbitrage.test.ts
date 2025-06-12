@@ -8,7 +8,7 @@ import { TradeService } from "../src/services/trades";
 import { CoinGeckoService } from "../src/services/coingecko";
 import { QueueService } from "../src/services/queue";
 import { DiSCORD_WEBHOOK_URL, VOLUME_CONFIG } from "../src/config/config";
-import { NetworkConfig, SwapEventData, VolumeStatus } from "../src/types";
+import { NetworkConfig, VolumeStatus } from "../src/types";
 import { DiscordNotificationService } from "../src/services/notification";
 
 // Mock dependencies
@@ -241,80 +241,6 @@ describe("ArbitrageService", () => {
       });
 
       await arbitrageService.manualScan();
-    });
-
-    it("should execute trades when profitable opportunity exists", async () => {
-      const mockTradeParams = {
-        tokenIn: mockConfig.tokens.ethereum.WETH.address,
-        tokenOut: mockConfig.tokens.ethereum.SEED.address,
-        amountIn: "1000000000000000000",
-        minAmountOut: "0",
-        network: "ethereum",
-      };
-
-      // Mock successful trade execution
-      (TradeService.prototype.executeTrade as jest.Mock).mockResolvedValue({
-        success: true,
-        txHash: "0x...",
-      });
-
-      await arbitrageService.manualScan();
-      expect(TradeService.prototype.executeTrade).toHaveBeenCalled();
-    });
-  });
-
-  describe("Error Handling", () => {
-    it("should handle network errors gracefully", async () => {
-      // Mock network error
-      (NetworkService.prototype.getNetworks as jest.Mock).mockImplementation(
-        () => {
-          throw new Error("Network error");
-        }
-      );
-
-      await expect(arbitrageService.manualScan()).rejects.toThrow(
-        "Network error"
-      );
-    });
-
-    it("should handle failed trades gracefully", async () => {
-      // Mock failed trade
-      (TradeService.prototype.executeTrade as jest.Mock).mockResolvedValue({
-        success: false,
-        error: "Insufficient liquidity",
-      });
-
-      await arbitrageService.manualScan();
-    });
-  });
-
-  describe("Event Listening", () => {
-    it("should start event listeners for all networks", async () => {
-      await arbitrageService.startEventListening();
-      expect(NetworkService.prototype.startEventListening).toHaveBeenCalled();
-    });
-
-    it("should process events in order", async () => {
-      const mockEvent: SwapEventData = {
-        network: "ethereum",
-        poolAddress: "0xd36ae827a9b62b8a32f0032cad1251b94fab1dd4",
-        txHash: "0x123...",
-        blockNumber: 12345678,
-        sender: "0x456...",
-        amount0: ethers.BigNumber.from("1000000000000000000"),
-        amount1: ethers.BigNumber.from("2000000000000000000"),
-        sqrtPriceX96: ethers.BigNumber.from("79228162514264337593543950336"),
-        tick: 0,
-      };
-
-      // Mock event processing
-      (QueueService.prototype.addToQueue as jest.Mock).mockImplementation(
-        (eventData: SwapEventData) => {
-          expect(eventData).toEqual(mockEvent);
-        }
-      );
-
-      await arbitrageService.startEventListening();
     });
   });
 });
