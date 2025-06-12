@@ -14,6 +14,8 @@ import { NetworkService } from "./network";
 import { PoolService } from "./pool";
 import { QueueService } from "./queue";
 import { sleep } from "../utils";
+import { DiscordNotificationService } from "./notification";
+import { DiSCORD_WEBHOOK_URL } from "../config/config";
 
 export class ArbitrageService {
   private networks: Map<string, NetworkConfig> = new Map();
@@ -23,6 +25,7 @@ export class ArbitrageService {
   private coinGeckoService: CoinGeckoService;
   private networkService: NetworkService;
   private queueService: QueueService;
+  private readonly notificationService: DiscordNotificationService;
 
   private minProfitThreshold: number = 1; // 1% minimum profit
   private seedTradeAmount: string = "1000000000000000000000"; // 1000 SEED tokens
@@ -33,6 +36,9 @@ export class ArbitrageService {
 
   constructor(private privateKey?: string) {
     privateKey = process.env.PRIVATE_KEY || privateKey;
+    this.notificationService = new DiscordNotificationService(
+      DiSCORD_WEBHOOK_URL
+    );
 
     // First, initialize NetworkService as it sets up the networks
     this.networkService = new NetworkService(
@@ -46,7 +52,10 @@ export class ArbitrageService {
     this.networks = this.networkService.getNetworks();
 
     // Now initialize other services with the networks
-    this.tradeService = new TradeService(this.networks);
+    this.tradeService = new TradeService(
+      this.networks,
+      this.notificationService
+    );
     this.queueService = new QueueService(this.scanAndExecute.bind(this));
     this.coinGeckoService = new CoinGeckoService();
     this.poolService = new PoolService(this.networks);
@@ -240,18 +249,23 @@ export class ArbitrageService {
       const sellNetwork = this.networks.get(sellNetworkKey);
 
       if (!buyNetwork || !sellNetwork) {
-        throw new Error(`Network configuration not found for ${buyNetworkKey} or ${sellNetworkKey}`);
+        throw new Error(
+          `Network configuration not found for ${buyNetworkKey} or ${sellNetworkKey}`
+        );
       }
 
       // Check if wallets are initialized
       if (!buyNetwork.wallet || !sellNetwork.wallet) {
-        throw new Error(`Wallet not initialized for ${buyNetworkKey} or ${sellNetworkKey}`);
+        throw new Error(
+          `Wallet not initialized for ${buyNetworkKey} or ${sellNetworkKey}`
+        );
       }
 
       // Check balances
       const buyNetworkBalances = await this.tradeService.checkBalances(
         buyNetworkKey
       );
+
       const sellNetworkBalances = await this.tradeService.checkBalances(
         sellNetworkKey
       );
@@ -270,6 +284,15 @@ export class ArbitrageService {
       );
 
       if (parseFloat(buyNetworkBalances.weth) < requiredWeth) {
+        await this.notificationService.sendNotification({
+          type: "LOW_BALANCE",
+          network: opportunity.buyNetwork,
+          balances: {
+            WETH: {
+              amount: buyNetworkBalances.weth,
+            },
+          },
+        });
         throw new Error(
           `Insufficient WETH on ${opportunity.buyNetwork}. Have: ${buyNetworkBalances.weth}, Need: ${requiredWeth}`
         );
@@ -320,7 +343,17 @@ export class ArbitrageService {
       const actualBalance = await tokenInContract.balanceOf(
         buyNetwork.wallet.address
       );
+
       if (actualBalance.lt(buyParams.amountIn)) {
+        await this.notificationService.sendNotification({
+          type: "LOW_BALANCE",
+          network: buyNetwork,
+          balances: {
+            WETH: {
+              amount: actualBalance,
+            },
+          },
+        });
         throw new Error(`Insufficient ${buyParams.tokenIn} balance`);
       }
 
@@ -363,6 +396,15 @@ export class ArbitrageService {
       );
 
       if (currentSeedBalance.eq(0)) {
+        await this.notificationService.sendNotification({
+          type: "LOW_BALANCE",
+          network: sellNetwork,
+          balances: {
+            SEED: {
+              amount: currentSeedBalance,
+            },
+          },
+        });
         throw new Error(
           `No SEED balance available to sell on ${opportunity.sellNetwork}`
         );
@@ -435,6 +477,7 @@ export class ArbitrageService {
     WETH: ${ethers.utils.formatUnits(wethAmount, 18)}`);
   }
 
+  // Just for testing
   // getStatus(): object {
   //   return {
   //     ...this.queueService.getStatus(),
@@ -522,6 +565,11 @@ export class ArbitrageService {
         );
       }
     } catch (error: any) {
+      await this.notificationService.sendCustomMessage(
+        "❌ Scan Error",
+        `Error during arbitrage scan: ${error.message}`,
+        0xff0000
+      );
       console.error(`❌ Scan failed: ${error.message}`);
     }
   }
@@ -543,7 +591,13 @@ export class ArbitrageService {
     this.networkService.startEventListening(
       this.minProfitThreshold,
       this.seedTradeAmount,
-      this.wethTradeAmount
+      this.wethTradeAmount,
+      this.notificationService
     );
+  }
+
+  public getWalletAddress(): string {
+    const network = this.networks.get("ethereum");
+    return network?.wallet?.address || "No wallet configured";
   }
 }

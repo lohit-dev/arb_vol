@@ -31,7 +31,7 @@ export const NETWORKS = {
     ),
   },
 } as const;
-
+export const DiSCORD_WEBHOOK_URL = getEnvVar("DISCORD_WEBHOOK_URL", "");
 export const VOLUME_CONFIG = {
   targetVolume: parseInt(
     getEnvVar("TARGET_VOLUME", rawConfig.volumeConfig.targetVolume.toString())

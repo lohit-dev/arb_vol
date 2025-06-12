@@ -1,10 +1,16 @@
 import { ArbitrageService } from "./services/arbitrage";
-import { VOLUME_CONFIG } from "./config/config";
+import { DiSCORD_WEBHOOK_URL, VOLUME_CONFIG } from "./config/config";
+import { DiscordNotificationService } from "./services/notification";
 
 async function main(): Promise<void> {
   const privateKey =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
   const bot = new ArbitrageService(privateKey);
+  const notificationService = new DiscordNotificationService(
+    DiSCORD_WEBHOOK_URL
+  );
+
+  await notificationService.sendStartupNotification(bot.getWalletAddress());
 
   bot.setMinProfitThreshold(0.1);
   bot.setTradeAmounts(

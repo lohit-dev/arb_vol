@@ -6,6 +6,7 @@ import { NetworkConfig, SwapEventData } from "../types";
 import { QueueService } from "./queue";
 import { TradeService } from "./trades";
 import { PoolService } from "./pool";
+import { DiscordNotificationService } from "./notification";
 
 export class NetworkService {
   private networks: Map<string, NetworkConfig> = new Map();
@@ -266,7 +267,8 @@ export class NetworkService {
   public async startEventListening(
     minProfitThreshold: number,
     seedTradeAmount: string,
-    wethTradeAmount: string
+    wethTradeAmount: string,
+    notificationService: DiscordNotificationService
   ): Promise<void> {
     if (!this.poolService) {
       throw new Error("Pool service not initialized");
@@ -310,14 +312,17 @@ export class NetworkService {
     console.log(`Press Ctrl+C to stop the bot`);
 
     // Handle graceful shutdown
-    process.on("SIGINT", () => {
+    process.on("SIGINT", async () => {
       console.log(`\n\n🛑 Shutting down bot...`);
+      await notificationService.sendShutdownNotification();
       this.cleanup();
       process.exit(0);
     });
 
-    process.on("SIGTERM", () => {
+    process.on("SIGTERM", async () => {
       console.log(`\n\n🛑 Shutting down bot...`);
+      await notificationService.sendShutdownNotification();
+
       this.cleanup();
       process.exit(0);
     });

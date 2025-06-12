@@ -2,12 +2,17 @@ import { ethers } from "ethers";
 import { ERC20_ABI } from "../contracts/abi";
 import { NetworkConfig, TradeParams } from "../types";
 import { generateRandomTradeAmount, sleep } from "../utils";
+import { DiscordNotificationService } from "./notification";
+import { VOLUME_CONFIG } from "../config/config";
 
 export class TradeService {
   private ourTransactions: Set<string> = new Set();
   private ourAddresses: Set<string> = new Set();
 
-  constructor(private networks: Map<string, NetworkConfig>) {}
+  constructor(
+    private networks: Map<string, NetworkConfig>,
+    private notificationService: DiscordNotificationService
+  ) {}
 
   async executeTrade(params: TradeParams): Promise<{
     success: boolean;
@@ -265,6 +270,18 @@ export class TradeService {
 
         attempts++;
       }
+
+      await this.notificationService.sendCustomMessage(
+        "🔄 Volume Rebalancing Complete",
+        `Network: ${networkKey.toUpperCase()}\n` +
+          `Current Volume: $${(
+            VOLUME_CONFIG.targetVolume - volumeDeficit
+          ).toFixed(2)}\n` +
+          `Target Volume: $${VOLUME_CONFIG.targetVolume}\n` +
+          `Generated Volume: $${volumeGenerated.toFixed(2)}\n` +
+          `Total Trades: ${attempts}`,
+        0x00ff00 // Green color
+      );
 
       return { success: true, volumeGenerated, attempts };
     } catch (error: any) {

@@ -5,8 +5,9 @@ import { NetworkService } from "../src/services/network";
 import { PoolService } from "../src/services/pool";
 import { TradeService } from "../src/services/trades";
 import { CoinGeckoService } from "../src/services/coingecko";
-import { VOLUME_CONFIG } from "../src/config/config";
+import { DiSCORD_WEBHOOK_URL, VOLUME_CONFIG } from "../src/config/config";
 import { NetworkConfig, RebalanceResult, VolumeStatus } from "../src/types";
+import { DiscordNotificationService } from "../src/services/notification";
 
 // Mock dependencies
 jest.mock("../src/services/network");
@@ -144,7 +145,8 @@ describe("VolumeService", () => {
     ) as jest.Mocked<NetworkService>;
     mockPoolService = new PoolService(mockNetworks) as jest.Mocked<PoolService>;
     mockTradeService = new TradeService(
-      mockNetworks
+      mockNetworks,
+      new DiscordNotificationService(DiSCORD_WEBHOOK_URL)
     ) as jest.Mocked<TradeService>;
     mockCoinGeckoService =
       new CoinGeckoService() as jest.Mocked<CoinGeckoService>;
