@@ -9,6 +9,7 @@ export const POOL_ABI = [
   "function fee() external view returns (uint24)",
   "function token0() external view returns (address)",
   "function token1() external view returns (address)",
+  "function decimals() external view returns (uint8)",
   "event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)",
 ];
 

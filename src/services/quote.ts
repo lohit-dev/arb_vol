@@ -36,26 +36,32 @@ export class QuoteService {
     }
 
     try {
-      const seedToWethQuote = await network.quoter.callStatic.quoteExactInputSingle(
-        network.tokens.SEED.address,
-        network.tokens.WETH.address,
-        poolInfo.actualFee,
-        this.seedTradeAmount,
-        0
-      );
+      const seedToWethQuote =
+        await network.quoter.callStatic.quoteExactInputSingle(
+          network.tokens.SEED.address,
+          network.tokens.WETH.address,
+          poolInfo.actualFee,
+          this.seedTradeAmount,
+          0
+        );
 
-      const wethToSeedQuote = await network.quoter.callStatic.quoteExactInputSingle(
-        network.tokens.WETH.address,
-        network.tokens.SEED.address,
-        poolInfo.actualFee,
-        this.wethTradeAmount,
-        0
-      );
+      const wethToSeedQuote =
+        await network.quoter.callStatic.quoteExactInputSingle(
+          network.tokens.WETH.address,
+          network.tokens.SEED.address,
+          poolInfo.actualFee,
+          this.wethTradeAmount,
+          0
+        );
 
       return {
         network: network.name,
-        seedToWethRate: parseFloat(ethers.utils.formatUnits(seedToWethQuote, 18)),
-        wethToSeedRate: parseFloat(ethers.utils.formatUnits(wethToSeedQuote, 18)),
+        seedToWethRate: parseFloat(
+          ethers.utils.formatUnits(seedToWethQuote, 18)
+        ),
+        wethToSeedRate: parseFloat(
+          ethers.utils.formatUnits(wethToSeedQuote, 18)
+        ),
         poolAddress: poolConfig.address,
         fee: poolInfo.actualFee,
       };
@@ -69,4 +75,4 @@ export class QuoteService {
     this.seedTradeAmount = seedAmount;
     this.wethTradeAmount = wethAmount;
   }
-} 
+}

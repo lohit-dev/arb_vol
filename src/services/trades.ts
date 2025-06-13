@@ -236,8 +236,10 @@ export class TradeService {
         console.log(`\n📊 PRICE VERIFICATION RESULTS:`);
         console.log(`Ethereum SEED/WETH Rate: ${ethSeedUsdPrice.toFixed(6)}`);
         console.log(`Arbitrum SEED/WETH Rate: ${arbSeedUsdPrice.toFixed(6)}`);
-        console.log(`Current Price Deviation: ${priceDeviationPercentage.toFixed(2)}%`);
-        
+        console.log(
+          `Current Price Deviation: ${priceDeviationPercentage.toFixed(2)}%`
+        );
+
         if (priceDeviationPercentage > 0.5) {
           console.log(`⚠️ Warning: Prices still show significant deviation`);
         } else {
@@ -341,26 +343,32 @@ export class TradeService {
     if (!network) return null;
 
     try {
-      const seedToWethQuote = await network.quoter.callStatic.quoteExactInputSingle(
-        network.tokens.SEED.address,
-        network.tokens.WETH.address,
-        3000, // Default fee tier
-        ethers.utils.parseUnits("1", 18), // 1 SEED token
-        0
-      );
+      const seedToWethQuote =
+        await network.quoter.callStatic.quoteExactInputSingle(
+          network.tokens.SEED.address,
+          network.tokens.WETH.address,
+          3000, // Default fee tier
+          ethers.utils.parseUnits("1", 18), // 1 SEED token
+          0
+        );
 
-      const wethToSeedQuote = await network.quoter.callStatic.quoteExactInputSingle(
-        network.tokens.WETH.address,
-        network.tokens.SEED.address,
-        3000, // Default fee tier
-        ethers.utils.parseUnits("1", 18), // 1 WETH token
-        0
-      );
+      const wethToSeedQuote =
+        await network.quoter.callStatic.quoteExactInputSingle(
+          network.tokens.WETH.address,
+          network.tokens.SEED.address,
+          3000, // Default fee tier
+          ethers.utils.parseUnits("1", 18), // 1 WETH token
+          0
+        );
 
       return {
         network: network.name,
-        seedToWethRate: parseFloat(ethers.utils.formatUnits(seedToWethQuote, 18)),
-        wethToSeedRate: parseFloat(ethers.utils.formatUnits(wethToSeedQuote, 18)),
+        seedToWethRate: parseFloat(
+          ethers.utils.formatUnits(seedToWethQuote, 18)
+        ),
+        wethToSeedRate: parseFloat(
+          ethers.utils.formatUnits(wethToSeedQuote, 18)
+        ),
         poolAddress: network.tokens.SEED.address,
         fee: 3000,
       };

@@ -92,35 +92,6 @@ export class ArbitrageService {
     return this.coinGeckoService.fetchPrices();
   }
 
-  private async calculateMinAmountOut(
-    networkKey: string,
-    tokenIn: string,
-    tokenOut: string,
-    amountIn: string,
-    fee: number,
-    slippagePercent: number = 5
-  ): Promise<string> {
-    const network = this.networks.get(networkKey);
-    if (!network) return "0";
-
-    try {
-      const quote = await network.quoter.callStatic.quoteExactInputSingle(
-        tokenIn,
-        tokenOut,
-        fee,
-        amountIn,
-        0
-      );
-
-      // Apply slippage tolerance
-      const minAmount = quote.mul(100 - slippagePercent).div(100);
-      return minAmount.toString();
-    } catch (error) {
-      console.error(`Failed to calculate min amount: ${error}`);
-      return "0"; // Accept any amount if calculation fails
-    }
-  }
-
   private async calculateArbitrageOpportunity(
     ethQuote: any,
     arbQuote: any,
