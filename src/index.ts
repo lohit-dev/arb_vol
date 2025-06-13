@@ -14,12 +14,9 @@ async function main(): Promise<void> {
 
   bot.setMinProfitThreshold(0.1);
   bot.setMinPriceDeviationThreshold(0.5);
-  bot.setTradeAmounts(
-    "1000000000000000000000", // 1000 SEED tokens (18 decimals)
-    "1000000000000000000" // 1 WETH (18 decimals)
-  );
+  bot.setTradeAmounts("1000000000000000000", "1000000000000000000");
   bot.setProcessingCooldown(2000); // 2 seconds
-  await bot.manualVolumeCheck();
+  // await bot.manualVolumeCheck();
 
   console.log(
     `💹 Volume rebalancer: $${VOLUME_CONFIG.targetVolume} target per network`

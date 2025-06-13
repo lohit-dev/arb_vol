@@ -29,7 +29,7 @@ export class ArbitrageService {
 
   private minPriceDeviationThreshold: number = 0.1;
   private minProfitThreshold: number = 1; // 1% minimum profit
-  private seedTradeAmount: string = "1000000000000000000000"; // 1000 SEED tokens
+  private seedTradeAmount: string = "1000000000000000000"; // 1 SEED token
   private wethTradeAmount: string = "1000000000000000000"; // 1 WETH token
 
   // Sequential processing state
@@ -156,6 +156,12 @@ export class ArbitrageService {
           0
         );
 
+      console.log(
+        `THe log weth to seed in ${JSON.stringify(
+          network.name
+        )} : ${ethers.utils.formatUnits(wethToSeedQuote, 18)}`
+      );
+
       return {
         network: network.name,
         seedToWethRate: parseFloat(
@@ -184,6 +190,9 @@ export class ArbitrageService {
 
     const ethSeedUsdPrice = ethQuote.seedToWethRate * prices.ethereum.usd;
     const arbSeedUsdPrice = arbQuote.seedToWethRate * prices.ethereum.usd;
+
+    console.log(`Quote value: `, ethQuote.seedToWethRate);
+    console.log(`ethereum price: ${prices.ethereum.usd}`);
 
     const priceDifference = Math.abs(ethSeedUsdPrice - arbSeedUsdPrice);
     const averagePrice = (ethSeedUsdPrice + arbSeedUsdPrice) / 2;

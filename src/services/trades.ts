@@ -215,6 +215,8 @@ export class TradeService {
         `\n✅ EQUILIBRIUM TRADE ${tradeId} COMPLETED - PRICES BALANCED`
       );
 
+      await sleep(5000);
+
       // Notify about successful equilibrium trade
       await this.notificationService.sendCustomMessage(
         "⚖️ Equilibrium Trade Complete",
