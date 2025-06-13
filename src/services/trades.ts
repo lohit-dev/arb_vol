@@ -4,6 +4,7 @@ import { ArbitrageOpportunity, NetworkConfig, TradeParams } from "../types";
 import { generateRandomTradeAmount, sleep } from "../utils";
 import { DiscordNotificationService } from "./notification";
 import { VOLUME_CONFIG } from "../config/config";
+import { QuoteService } from "./quote";
 
 export class TradeService {
   private ourTransactions: Set<string> = new Set();
@@ -11,7 +12,8 @@ export class TradeService {
 
   constructor(
     private networks: Map<string, NetworkConfig>,
-    private notificationService: DiscordNotificationService
+    private notificationService: DiscordNotificationService,
+    private quoteService: QuoteService
   ) {}
 
   async executeTrade(params: TradeParams): Promise<{
@@ -217,6 +219,34 @@ export class TradeService {
 
       await sleep(5000);
 
+      // Verify prices after equilibrium trade
+      console.log("\n🔍 VERIFYING PRICES AFTER EQUILIBRIUM TRADE");
+      const [ethQuote, arbQuote] = await Promise.all([
+        this.quoteService.getQuote("ethereum"),
+        this.quoteService.getQuote("arbitrum"),
+      ]);
+
+      if (ethQuote && arbQuote) {
+        const ethSeedUsdPrice = ethQuote.seedToWethRate;
+        const arbSeedUsdPrice = arbQuote.seedToWethRate;
+        const priceDifference = Math.abs(ethSeedUsdPrice - arbSeedUsdPrice);
+        const averagePrice = (ethSeedUsdPrice + arbSeedUsdPrice) / 2;
+        const priceDeviationPercentage = (priceDifference / averagePrice) * 100;
+
+        console.log(`\n📊 PRICE VERIFICATION RESULTS:`);
+        console.log(`Ethereum SEED/WETH Rate: ${ethSeedUsdPrice.toFixed(6)}`);
+        console.log(`Arbitrum SEED/WETH Rate: ${arbSeedUsdPrice.toFixed(6)}`);
+        console.log(`Current Price Deviation: ${priceDeviationPercentage.toFixed(2)}%`);
+        
+        if (priceDeviationPercentage > 0.5) {
+          console.log(`⚠️ Warning: Prices still show significant deviation`);
+        } else {
+          console.log(`✅ Prices are well balanced`);
+        }
+      } else {
+        console.log(`❌ Failed to verify prices after equilibrium trade`);
+      }
+
       // Notify about successful equilibrium trade
       await this.notificationService.sendCustomMessage(
         "⚖️ Equilibrium Trade Complete",
@@ -298,6 +328,46 @@ export class TradeService {
       networkKey.charAt(0).toUpperCase() + networkKey.slice(1).toLowerCase()
     );
     return network;
+  }
+
+  private async getQuote(networkKey: string): Promise<{
+    network: string;
+    seedToWethRate: number;
+    wethToSeedRate: number;
+    poolAddress: string;
+    fee: number;
+  } | null> {
+    const network = this.getNetwork(networkKey);
+    if (!network) return null;
+
+    try {
+      const seedToWethQuote = await network.quoter.callStatic.quoteExactInputSingle(
+        network.tokens.SEED.address,
+        network.tokens.WETH.address,
+        3000, // Default fee tier
+        ethers.utils.parseUnits("1", 18), // 1 SEED token
+        0
+      );
+
+      const wethToSeedQuote = await network.quoter.callStatic.quoteExactInputSingle(
+        network.tokens.WETH.address,
+        network.tokens.SEED.address,
+        3000, // Default fee tier
+        ethers.utils.parseUnits("1", 18), // 1 WETH token
+        0
+      );
+
+      return {
+        network: network.name,
+        seedToWethRate: parseFloat(ethers.utils.formatUnits(seedToWethQuote, 18)),
+        wethToSeedRate: parseFloat(ethers.utils.formatUnits(wethToSeedQuote, 18)),
+        poolAddress: network.tokens.SEED.address,
+        fee: 3000,
+      };
+    } catch (error: any) {
+      console.error(`❌ Quote failed for ${network.name}: ${error.message}`);
+      return null;
+    }
   }
 
   public async executeRebalanceTrades(
