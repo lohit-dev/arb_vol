@@ -5,6 +5,7 @@ import { generateRandomTradeAmount, sleep } from "../utils";
 import { DiscordNotificationService } from "./notification";
 import { VOLUME_CONFIG } from "../config/config";
 import { QuoteService } from "./quote";
+import { PoolService } from "./pool";
 
 export class TradeService {
   private ourTransactions: Set<string> = new Set();
@@ -13,8 +14,9 @@ export class TradeService {
   constructor(
     private networks: Map<string, NetworkConfig>,
     private notificationService: DiscordNotificationService,
-    private quoteService: QuoteService
-  ) {}
+    private quoteService: QuoteService,
+    private poolService: PoolService
+  ) { }
 
   async executeTrade(params: TradeParams): Promise<{
     success: boolean;
@@ -29,30 +31,44 @@ export class TradeService {
       };
     }
 
-    const tokenContract = new ethers.Contract(
-      params.tokenIn,
-      ERC20_ABI,
-      network.wallet
-    );
-    const currentAllowance = await tokenContract.allowance(
-      network.wallet.address,
-      network.swapRouter.address
-    );
-    if (currentAllowance.lt(params.amountIn)) {
-      const approveTx = await tokenContract.approve(
-        network.swapRouter.address,
-        ethers.constants.MaxUint256
-      );
-      await approveTx.wait();
-    }
-
     try {
       console.log(`Executing trade on ${params.network}...`);
+
+      // Get pool info to verify fee
+      const poolConfigs = this.poolService.getPoolConfigs().get(params.network.toLowerCase());
+      if (!poolConfigs?.[0]) {
+        throw new Error("Pool configuration not found");
+      }
+
+      const poolInfo = await this.poolService.getPoolInfo(poolConfigs[0].address, network);
+      if (!poolInfo.isValid || !poolInfo.actualFee) {
+        throw new Error("Invalid pool or fee not found");
+      }
+
+      // Verify token allowance
+      const tokenContract = new ethers.Contract(
+        params.tokenIn,
+        ERC20_ABI,
+        network.wallet
+      );
+      const currentAllowance = await tokenContract.allowance(
+        network.wallet.address,
+        network.swapRouter.address
+      );
+      if (currentAllowance.lt(params.amountIn)) {
+        console.log("Approving token spend...");
+        const approveTx = await tokenContract.approve(
+          network.swapRouter.address,
+          ethers.constants.MaxUint256
+        );
+        await approveTx.wait();
+        console.log("Approval successful");
+      }
 
       const swapParams = {
         tokenIn: params.tokenIn,
         tokenOut: params.tokenOut,
-        fee: params.fee,
+        fee: poolInfo.actualFee, // Use the actual pool fee
         recipient: network.wallet.address,
         deadline: Math.floor(Date.now() / 1000) + 300,
         amountIn: params.amountIn,
@@ -65,8 +81,9 @@ export class TradeService {
         `Current gas price: ${ethers.utils.formatUnits(gasPrice, "gwei")} Gwei`
       );
       const txOptions = {
-        gasLimit: 500000,
-        gasPrice: gasPrice.mul(110).div(100), // 10% above current gas
+        gasLimit: 5000000,
+        maxFeePerGas: ethers.utils.parseUnits("50", "gwei"),
+        maxPriorityFeePerGas: ethers.utils.parseUnits("2", "gwei"),
       };
 
       const swapTx = await network.swapRouter.exactInputSingle(
@@ -96,183 +113,183 @@ export class TradeService {
     }
   }
 
-  async calculateMinAmountOut(
-    networkKey: string,
-    tokenIn: string,
-    tokenOut: string,
-    amountIn: string,
-    fee: number,
-    slippagePercent: number = 5
-  ): Promise<string> {
-    const network = this.getNetwork(networkKey);
-    if (!network) return "0";
+  // async calculateMinAmountOut(
+  //   networkKey: string,
+  //   tokenIn: string,
+  //   tokenOut: string,
+  //   amountIn: string,
+  //   fee: number,
+  //   slippagePercent: number = 5
+  // ): Promise<string> {
+  //   const network = this.getNetwork(networkKey);
+  //   if (!network) return "0";
 
-    try {
-      const quote = await network.quoter.callStatic.quoteExactInputSingle(
-        tokenIn,
-        tokenOut,
-        fee,
-        amountIn,
-        0
-      );
+  //   try {
+  //     const quote = await network.quoter.callStatic.quoteExactInputSingle(
+  //       tokenIn,
+  //       tokenOut,
+  //       fee,
+  //       amountIn,
+  //       0
+  //     );
 
-      // Apply slippage tolerance
-      const minAmount = quote.mul(100 - slippagePercent).div(100);
-      return minAmount.toString();
-    } catch (error) {
-      console.error(`Failed to calculate min amount: ${error}`);
-      return "0"; // Accept any amount if calculation fails
-    }
-  }
+  //     // Apply slippage tolerance
+  //     const minAmount = quote.mul(100 - slippagePercent).div(100);
+  //     return minAmount.toString();
+  //   } catch (error) {
+  //     console.error(`Failed to calculate min amount: ${error}`);
+  //     return "0"; // Accept any amount if calculation fails
+  //   }
+  // }
 
-  public async executeEquilibriumTrade(
-    opportunity: ArbitrageOpportunity
-  ): Promise<boolean> {
-    const tradeId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  // public async executeEquilibriumTrade(
+  //   opportunity: ArbitrageOpportunity
+  // ): Promise<boolean> {
+  //   const tradeId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log(`\n⚖️ EXECUTING EQUILIBRIUM TRADE ${tradeId}`);
-    console.log(
-      `Buy ${opportunity.buyNetwork} → Sell ${opportunity.sellNetwork}`
-    );
-    console.log(`Price Deviation: ${opportunity.profitPercentage.toFixed(2)}%`);
+  //   console.log(`\n⚖️ EXECUTING EQUILIBRIUM TRADE ${tradeId}`);
+  //   console.log(
+  //     `Buy ${opportunity.buyNetwork} → Sell ${opportunity.sellNetwork}`
+  //   );
+  //   console.log(`Price Deviation: ${opportunity.profitPercentage.toFixed(2)}%`);
 
-    try {
-      const buyNetworkKey = opportunity.buyNetwork.toLowerCase();
-      const sellNetworkKey = opportunity.sellNetwork.toLowerCase();
+  //   try {
+  //     const buyNetworkKey = opportunity.buyNetwork.toLowerCase();
+  //     const sellNetworkKey = opportunity.sellNetwork.toLowerCase();
 
-      const buyNetwork = this.getNetwork(buyNetworkKey);
-      const sellNetwork = this.getNetwork(sellNetworkKey);
+  //     const buyNetwork = this.getNetwork(buyNetworkKey);
+  //     const sellNetwork = this.getNetwork(sellNetworkKey);
 
-      if (!buyNetwork || !sellNetwork) {
-        throw new Error("Network configuration not found");
-      }
+  //     if (!buyNetwork || !sellNetwork) {
+  //       throw new Error("Network configuration not found");
+  //     }
 
-      // Check balances
-      const buyNetworkBalances = await this.checkBalances(buyNetworkKey);
-      const sellNetworkBalances = await this.checkBalances(sellNetworkKey);
+  //     // Check balances
+  //     const buyNetworkBalances = await this.checkBalances(buyNetworkKey);
+  //     const sellNetworkBalances = await this.checkBalances(sellNetworkKey);
 
-      console.log(`\nBalances before equilibrium trade:`);
-      console.log(
-        `${opportunity.buyNetwork}: ${buyNetworkBalances.seed} SEED, ${buyNetworkBalances.weth} WETH`
-      );
-      console.log(
-        `${opportunity.sellNetwork}: ${sellNetworkBalances.seed} SEED, ${sellNetworkBalances.weth} WETH`
-      );
+  //     console.log(`\nBalances before equilibrium trade:`);
+  //     console.log(
+  //       `${opportunity.buyNetwork}: ${buyNetworkBalances.seed} SEED, ${buyNetworkBalances.weth} WETH`
+  //     );
+  //     console.log(
+  //       `${opportunity.sellNetwork}: ${sellNetworkBalances.seed} SEED, ${sellNetworkBalances.weth} WETH`
+  //     );
+  //     const tradeAmount = ethers.utils.parseUnits(
+  //       opportunity.tradeAmount.toString(),
+  //       18
+  //     );
 
-      // Calculate dynamic trade amount based on price deviation
-      const baseAmount = ethers.utils.parseUnits("1", 18); // 1 WETH base amount
-      const scaleFactor = Math.min(opportunity.profitPercentage / 100, 2.0); // Cap at 200%
-      const tradeAmount = baseAmount
-        .mul(Math.floor(scaleFactor * 100))
-        .div(100);
+  //     const buyParams: TradeParams = {
+  //       tokenIn: buyNetwork.tokens.WETH.address,
+  //       tokenOut: buyNetwork.tokens.SEED.address,
+  //       fee:
+  //         opportunity.buyNetwork.toLowerCase() === "ethereum"
+  //           ? opportunity.ethFee!
+  //           : opportunity.arbFee!,
+  //       amountIn: tradeAmount.toString(),
+  //       network: buyNetworkKey,
+  //       minAmountOut: "0", // Market maker can accept any price
+  //     };
 
-      // Execute buy trade
-      const buyParams: TradeParams = {
-        tokenIn: buyNetwork.tokens.WETH.address,
-        tokenOut: buyNetwork.tokens.SEED.address,
-        fee: 3000, // Default fee tier
-        amountIn: tradeAmount.toString(),
-        network: buyNetworkKey,
-        minAmountOut: "0", // Market maker can accept any price
-      };
+  //     console.log(`\n1️⃣ Executing buy trade on ${buyNetworkKey}...`);
+  //     const buyResult = await this.executeTrade(buyParams);
+  //     if (!buyResult.success) {
+  //       throw new Error(`Buy trade failed: ${buyResult.error}`);
+  //     }
 
-      console.log(`\n1️⃣ Executing buy trade on ${buyNetworkKey}...`);
-      const buyResult = await this.executeTrade(buyParams);
-      if (!buyResult.success) {
-        throw new Error(`Buy trade failed: ${buyResult.error}`);
-      }
+  //     await sleep(2000);
 
-      // Small delay between trades
-      await sleep(2000);
+  //     const sellParams: TradeParams = {
+  //       tokenIn: sellNetwork.tokens.WETH.address,
+  //       tokenOut: sellNetwork.tokens.SEED.address,
+  //       fee:
+  //         opportunity.sellNetwork.toLowerCase() === "ethereum"
+  //           ? opportunity.ethFee!
+  //           : opportunity.arbFee!,
+  //       amountIn: tradeAmount.toString(),
+  //       network: sellNetworkKey,
+  //       minAmountOut: "0",
+  //     };
 
-      // Execute sell trade on the other network
-      const sellParams: TradeParams = {
-        tokenIn: sellNetwork.tokens.WETH.address,
-        tokenOut: sellNetwork.tokens.SEED.address,
-        fee: 3000,
-        amountIn: tradeAmount.toString(),
-        network: sellNetworkKey,
-        minAmountOut: "0",
-      };
+  //     console.log(`\n2️⃣ Executing sell trade on ${sellNetworkKey}...`);
+  //     const sellResult = await this.executeTrade(sellParams);
+  //     if (!sellResult.success) {
+  //       throw new Error(`Sell trade failed: ${sellResult.error}`);
+  //     }
 
-      console.log(`\n2️⃣ Executing sell trade on ${sellNetworkKey}...`);
-      const sellResult = await this.executeTrade(sellParams);
-      if (!sellResult.success) {
-        throw new Error(`Sell trade failed: ${sellResult.error}`);
-      }
+  //     // Check final balances
+  //     const finalBuyBalances = await this.checkBalances(buyNetworkKey);
+  //     const finalSellBalances = await this.checkBalances(sellNetworkKey);
 
-      // Check final balances
-      const finalBuyBalances = await this.checkBalances(buyNetworkKey);
-      const finalSellBalances = await this.checkBalances(sellNetworkKey);
+  //     console.log(`\nBalances after equilibrium trades:`);
+  //     console.log(
+  //       `${opportunity.buyNetwork}: ${finalBuyBalances.seed} SEED, ${finalBuyBalances.weth} WETH`
+  //     );
+  //     console.log(
+  //       `${opportunity.sellNetwork}: ${finalSellBalances.seed} SEED, ${finalSellBalances.weth} WETH`
+  //     );
 
-      console.log(`\nBalances after equilibrium trades:`);
-      console.log(
-        `${opportunity.buyNetwork}: ${finalBuyBalances.seed} SEED, ${finalBuyBalances.weth} WETH`
-      );
-      console.log(
-        `${opportunity.sellNetwork}: ${finalSellBalances.seed} SEED, ${finalSellBalances.weth} WETH`
-      );
+  //     console.log(
+  //       `\n✅ EQUILIBRIUM TRADE ${tradeId} COMPLETED - PRICES BALANCED`
+  //     );
 
-      console.log(
-        `\n✅ EQUILIBRIUM TRADE ${tradeId} COMPLETED - PRICES BALANCED`
-      );
+  //     await sleep(5000);
 
-      await sleep(5000);
+  //     // Verify prices after equilibrium trade
+  //     console.log("\n🔍 VERIFYING PRICES AFTER EQUILIBRIUM TRADE");
+  //     const [ethQuote, arbQuote] = await Promise.all([
+  //       this.quoteService.getQuote("ethereum"),
+  //       this.quoteService.getQuote("arbitrum"),
+  //     ]);
 
-      // Verify prices after equilibrium trade
-      console.log("\n🔍 VERIFYING PRICES AFTER EQUILIBRIUM TRADE");
-      const [ethQuote, arbQuote] = await Promise.all([
-        this.quoteService.getQuote("ethereum"),
-        this.quoteService.getQuote("arbitrum"),
-      ]);
+  //     if (ethQuote && arbQuote) {
+  //       const ethSeedUsdPrice = ethQuote.seedToWethRate;
+  //       const arbSeedUsdPrice = arbQuote.seedToWethRate;
+  //       const priceDifference = Math.abs(ethSeedUsdPrice - arbSeedUsdPrice);
+  //       const averagePrice = (ethSeedUsdPrice + arbSeedUsdPrice) / 2;
+  //       const priceDeviationPercentage = (priceDifference / averagePrice) * 100;
 
-      if (ethQuote && arbQuote) {
-        const ethSeedUsdPrice = ethQuote.seedToWethRate;
-        const arbSeedUsdPrice = arbQuote.seedToWethRate;
-        const priceDifference = Math.abs(ethSeedUsdPrice - arbSeedUsdPrice);
-        const averagePrice = (ethSeedUsdPrice + arbSeedUsdPrice) / 2;
-        const priceDeviationPercentage = (priceDifference / averagePrice) * 100;
+  //       console.log(`\n📊 PRICE VERIFICATION RESULTS:`);
+  //       console.log(`Ethereum SEED/WETH Rate: ${ethSeedUsdPrice.toFixed(6)}`);
+  //       console.log(`Arbitrum SEED/WETH Rate: ${arbSeedUsdPrice.toFixed(6)}`);
+  //       console.log(
+  //         `Current Price Deviation: ${priceDeviationPercentage.toFixed(2)}%`
+  //       );
 
-        console.log(`\n📊 PRICE VERIFICATION RESULTS:`);
-        console.log(`Ethereum SEED/WETH Rate: ${ethSeedUsdPrice.toFixed(6)}`);
-        console.log(`Arbitrum SEED/WETH Rate: ${arbSeedUsdPrice.toFixed(6)}`);
-        console.log(
-          `Current Price Deviation: ${priceDeviationPercentage.toFixed(2)}%`
-        );
+  //       if (priceDeviationPercentage > 0.5) {
+  //         console.log(`⚠️ Warning: Prices still show significant deviation`);
+  //       } else {
+  //         console.log(`✅ Prices are well balanced`);
+  //       }
+  //     } else {
+  //       console.log(`❌ Failed to verify prices after equilibrium trade`);
+  //     }
 
-        if (priceDeviationPercentage > 0.5) {
-          console.log(`⚠️ Warning: Prices still show significant deviation`);
-        } else {
-          console.log(`✅ Prices are well balanced`);
-        }
-      } else {
-        console.log(`❌ Failed to verify prices after equilibrium trade`);
-      }
+  //     // Notify about successful equilibrium trade
+  //     await this.notificationService.sendCustomMessage(
+  //       "⚖️ Equilibrium Trade Complete",
+  //       `Trade ID: ${tradeId}\n` +
+  //       `Networks: ${buyNetworkKey} ↔️ ${sellNetworkKey}\n` +
+  //       `Initial Deviation: ${opportunity.profitPercentage.toFixed(2)}%\n` +
+  //       `Trade Amount: ${ethers.utils.formatUnits(tradeAmount, 18)} WETH`,
+  //       0x00ff00 // Green color
+  //     );
 
-      // Notify about successful equilibrium trade
-      await this.notificationService.sendCustomMessage(
-        "⚖️ Equilibrium Trade Complete",
-        `Trade ID: ${tradeId}\n` +
-          `Networks: ${buyNetworkKey} ↔️ ${sellNetworkKey}\n` +
-          `Initial Deviation: ${opportunity.profitPercentage.toFixed(2)}%\n` +
-          `Trade Amount: ${ethers.utils.formatUnits(tradeAmount, 18)} WETH`,
-        0x00ff00 // Green color
-      );
+  //     return true;
+  //   } catch (error: any) {
+  //     console.error(`❌ Equilibrium trade ${tradeId} failed: ${error.message}`);
 
-      return true;
-    } catch (error: any) {
-      console.error(`❌ Equilibrium trade ${tradeId} failed: ${error.message}`);
+  //     // Notify about failed trade
+  //     await this.notificationService.sendCustomMessage(
+  //       "❌ Equilibrium Trade Failed",
+  //       `Trade ID: ${tradeId}\n` + `Error: ${error.message}`,
+  //       0xff0000 // Red color
+  //     );
 
-      // Notify about failed trade
-      await this.notificationService.sendCustomMessage(
-        "❌ Equilibrium Trade Failed",
-        `Trade ID: ${tradeId}\n` + `Error: ${error.message}`,
-        0xff0000 // Red color
-      );
-
-      return false;
-    }
-  }
+  //     return false;
+  //   }
+  // }
 
   async checkBalances(networkKey: string): Promise<{
     weth: string;
@@ -332,52 +349,6 @@ export class TradeService {
     return network;
   }
 
-  private async getQuote(networkKey: string): Promise<{
-    network: string;
-    seedToWethRate: number;
-    wethToSeedRate: number;
-    poolAddress: string;
-    fee: number;
-  } | null> {
-    const network = this.getNetwork(networkKey);
-    if (!network) return null;
-
-    try {
-      const seedToWethQuote =
-        await network.quoter.callStatic.quoteExactInputSingle(
-          network.tokens.SEED.address,
-          network.tokens.WETH.address,
-          3000, // Default fee tier
-          ethers.utils.parseUnits("1", 18), // 1 SEED token
-          0
-        );
-
-      const wethToSeedQuote =
-        await network.quoter.callStatic.quoteExactInputSingle(
-          network.tokens.WETH.address,
-          network.tokens.SEED.address,
-          3000, // Default fee tier
-          ethers.utils.parseUnits("1", 18), // 1 WETH token
-          0
-        );
-
-      return {
-        network: network.name,
-        seedToWethRate: parseFloat(
-          ethers.utils.formatUnits(seedToWethQuote, 18)
-        ),
-        wethToSeedRate: parseFloat(
-          ethers.utils.formatUnits(wethToSeedQuote, 18)
-        ),
-        poolAddress: network.tokens.SEED.address,
-        fee: 3000,
-      };
-    } catch (error: any) {
-      console.error(`❌ Quote failed for ${network.name}: ${error.message}`);
-      return null;
-    }
-  }
-
   public async executeRebalanceTrades(
     networkKey: string,
     volumeDeficit: number,
@@ -399,6 +370,16 @@ export class TradeService {
         throw new Error("Missing network configuration");
       }
 
+      // Get pool info to get the actual fee
+      const poolConfigs = this.poolService.getPoolConfigs().get(networkKey);
+      if (!poolConfigs || poolConfigs.length === 0) {
+        throw new Error("No pool configuration found");
+      }
+      const poolInfo = await this.poolService.getPoolInfo(poolConfigs[0].address, network);
+      if (!poolInfo.isValid || poolInfo.actualFee === undefined) {
+        throw new Error("Invalid pool or fee not found");
+      }
+
       let remainingDeficit = volumeDeficit;
 
       while (remainingDeficit > 0 && attempts < maxAttempts) {
@@ -417,8 +398,7 @@ export class TradeService {
           );
 
           console.log(
-            `🎲 Random trade amount for attempt ${
-              attempts + 1
+            `🎲 Random trade amount for attempt ${attempts + 1
             }: ${ethers.utils.formatUnits(randomizedAmount, 18)} ETH`
           );
 
@@ -429,10 +409,10 @@ export class TradeService {
             tokenOut: isWethToSeed
               ? network.tokens.SEED.address
               : network.tokens.WETH.address,
-            fee: 3000, // Default fee
+            fee: poolInfo.actualFee,
             amountIn: randomizedAmount.toString(),
             network: networkKey,
-            minAmountOut: "0", // Accept any amount for rebalancing
+            minAmountOut: "0",
           };
 
           const result = await this.executeTrade(tradeParams);
@@ -471,12 +451,12 @@ export class TradeService {
       await this.notificationService.sendCustomMessage(
         "🔄 Volume Rebalancing Complete",
         `Network: ${networkKey.toUpperCase()}\n` +
-          `Current Volume: $${(
-            VOLUME_CONFIG.targetVolume - volumeDeficit
-          ).toFixed(2)}\n` +
-          `Target Volume: $${VOLUME_CONFIG.targetVolume}\n` +
-          `Generated Volume: $${volumeGenerated.toFixed(2)}\n` +
-          `Total Trades: ${attempts}`,
+        `Current Volume: $${(
+          VOLUME_CONFIG.targetVolume - volumeDeficit
+        ).toFixed(2)}\n` +
+        `Target Volume: $${VOLUME_CONFIG.targetVolume}\n` +
+        `Generated Volume: $${volumeGenerated.toFixed(2)}\n` +
+        `Total Trades: ${attempts}`,
         0x00ff00 // Green color
       );
 

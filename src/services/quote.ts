@@ -9,7 +9,7 @@ export class QuoteService {
   constructor(
     private networks: Map<string, NetworkConfig>,
     private poolService: PoolService
-  ) {}
+  ) { }
 
   public async getQuote(networkKey: string): Promise<{
     network: string;
@@ -69,10 +69,5 @@ export class QuoteService {
       console.error(`❌ Quote failed for ${network.name}: ${error.message}`);
       return null;
     }
-  }
-
-  public setTradeAmounts(seedAmount: string, wethAmount: string): void {
-    this.seedTradeAmount = seedAmount;
-    this.wethTradeAmount = wethAmount;
   }
 }

@@ -11,7 +11,7 @@ import { DiscordNotificationService } from "./notification";
 export class NetworkService {
   private networks: Map<string, NetworkConfig> = new Map();
   private poolContracts: Map<string, ethers.Contract[]> = new Map();
-  private poolService: PoolService;
+  private poolService!: PoolService;
 
   constructor(
     private queueService: QueueService,
@@ -270,25 +270,17 @@ export class NetworkService {
     wethTradeAmount: string,
     notificationService: DiscordNotificationService
   ): Promise<void> {
+    console.log(`\n🎧 Starting event listeners for all networks`);
+    console.log(`Minimum profit threshold: ${minProfitThreshold}%`);
+    console.log(`Trade amounts are now calculated dynamically based on pool reserves`);
+
+    // Initialize pool service if not already initialized
     if (!this.poolService) {
-      throw new Error("Pool service not initialized");
+      console.error("❌ Pool service not initialized");
+      return;
     }
 
-    console.log(`\n🚀 STARTING EVENT-DRIVEN ARBITRAGE BOT`);
-    console.log("=".repeat(60));
-    console.log(`💰 Minimum profit threshold: ${minProfitThreshold}%`);
-    console.log(
-      `🎯 Trade amounts:
-      SEED: ${ethers.utils.formatUnits(seedTradeAmount, 18)}
-      WETH: ${ethers.utils.formatUnits(wethTradeAmount, 18)}`
-    );
-    console.log(
-      `${this.privateKey ? "✅" : "❌"} Trading ${
-        this.privateKey ? "ENABLED" : "DISABLED"
-      }`
-    );
-
-    // Setup initial pool contracts and listeners
+    // Initialize pool contracts
     this.initializePoolContracts();
 
     // Setup event listeners for all networks
@@ -328,7 +320,7 @@ export class NetworkService {
     });
 
     // Keep the process running
-    return new Promise(() => {});
+    return new Promise(() => { });
   }
 
   cleanup(): void {

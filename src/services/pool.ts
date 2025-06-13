@@ -2,22 +2,22 @@ import { ethers } from "ethers";
 import { POOL_CONFIGS } from "../config/config";
 import { POOL_ABI } from "../contracts/abi";
 import { NetworkConfig } from "../types";
+import { CLIENT_RENEG_LIMIT } from "tls";
 
 export interface PoolConfig {
   address: string;
 }
 
 export interface TokenInfo {
+  name: string;
   address: string;
   symbol: string;
   decimals: number;
+  reserve0: string;
+  reserve1: string;
 }
 
 export interface PoolReserves {
-  reserve0: string;
-  reserve1: string;
-  reserve0Formatted: string;
-  reserve1Formatted: string;
   token0Info: TokenInfo;
   token1Info: TokenInfo;
 }
@@ -84,7 +84,7 @@ export class PoolService {
         poolContract.slot0(),
       ]);
 
-      console.log(`The slot0 is: ${JSON.stringify(slot0)}`);
+      // console.log(`The slot0 is: ${JSON.stringify(slot0)}`);
 
       const reserves = await this.getVirtualReserves(
         liquidity,
@@ -94,7 +94,7 @@ export class PoolService {
         network
       );
 
-      console.log(`The reserves are: ${JSON.stringify(reserves)}`);
+      // console.log(`The reserves are: ${JSON.stringify(reserves)}`);
 
       const token0Lower = token0.toLowerCase();
       const token1Lower = token1.toLowerCase();
@@ -126,7 +126,7 @@ export class PoolService {
   private async getTokenInfo(
     tokenAddress: string,
     network: NetworkConfig
-  ): Promise<TokenInfo> {
+  ): Promise<{ symbol: string; decimals: number }> {
     const ERC20_ABI = [
       "function decimals() external view returns (uint8)",
       "function symbol() external view returns (string)",
@@ -145,7 +145,6 @@ export class PoolService {
       ]);
 
       return {
-        address: tokenAddress,
         symbol,
         decimals,
       };
@@ -153,7 +152,6 @@ export class PoolService {
       console.error(`Error getting token info for ${tokenAddress}:`, error);
       // Fallback with default values
       return {
-        address: tokenAddress,
         symbol: "UNKNOWN",
         decimals: 18,
       };
@@ -169,7 +167,7 @@ export class PoolService {
   ): Promise<PoolReserves> {
     try {
       // Get token information including symbols and decimals
-      const [token0Info, token1Info] = await Promise.all([
+      const [token0Data, token1Data] = await Promise.all([
         this.getTokenInfo(token0Address, network),
         this.getTokenInfo(token1Address, network),
       ]);
@@ -181,24 +179,39 @@ export class PoolService {
       const reserve1 = (liquidityBig * sqrtPriceBig) / Q96;
       const reserve0 = (liquidityBig * Q96) / sqrtPriceBig;
 
-      const decimals0Big = BigInt(10 ** token0Info.decimals);
-      const decimals1Big = BigInt(10 ** token1Info.decimals);
+      const decimals0Big = BigInt(10 ** token0Data.decimals);
+      const decimals1Big = BigInt(10 ** token1Data.decimals);
 
       const reserve0Formatted = (reserve0 / decimals0Big).toString();
       const reserve1Formatted = (reserve1 / decimals1Big).toString();
 
       console.log(
-        `Reserve 0 for network (${network.name}): ${reserve0Formatted} ${token0Info.symbol}`
+        `Reserve 0 for network (${network.name}): ${reserve0Formatted} ${token0Data.symbol}`
       );
       console.log(
-        `Reserve 1 for network (${network.name}): ${reserve1Formatted} ${token1Info.symbol}`
+        `Reserve 1 for network (${network.name}): ${reserve1Formatted} ${token1Data.symbol}`
       );
+      console.log("=============================")
+
+      const token0Info: TokenInfo = {
+        name: network.name,
+        address: token0Address,
+        symbol: token0Data.symbol,
+        decimals: token0Data.decimals,
+        reserve0: reserve0Formatted,
+        reserve1: reserve1Formatted,
+      };
+
+      const token1Info: TokenInfo = {
+        name: network.name,
+        address: token1Address,
+        symbol: token1Data.symbol,
+        decimals: token1Data.decimals,
+        reserve0: reserve0Formatted,
+        reserve1: reserve1Formatted,
+      };
 
       return {
-        reserve0: reserve0.toString(),
-        reserve1: reserve1.toString(),
-        reserve0Formatted,
-        reserve1Formatted,
         token0Info,
         token1Info,
       };
@@ -210,7 +223,8 @@ export class PoolService {
         token0Address,
         token1Address,
         18,
-        18
+        18,
+        network
       );
     }
   }
@@ -221,7 +235,8 @@ export class PoolService {
     token0Address: string,
     token1Address: string,
     decimals0: number,
-    decimals1: number
+    decimals1: number,
+    network: NetworkConfig
   ): PoolReserves {
     const Q96 = BigInt(2 ** 96);
     const liquidityBig = BigInt(liquidity.toString());
@@ -230,24 +245,27 @@ export class PoolService {
     const reserve1 = (liquidityBig * sqrtPriceBig) / Q96;
     const reserve0 = (liquidityBig * Q96) / sqrtPriceBig;
 
-    const decimals0Big = BigInt(10 ** decimals0);
-    const decimals1Big = BigInt(10 ** decimals1);
-
-    return {
+    const token0Info: TokenInfo = {
+      name: network.name,
+      address: token0Address,
+      symbol: "UNKNOWN",
+      decimals: decimals0,
       reserve0: reserve0.toString(),
       reserve1: reserve1.toString(),
-      reserve0Formatted: (reserve0 / decimals0Big).toString(),
-      reserve1Formatted: (reserve1 / decimals1Big).toString(),
-      token0Info: {
-        address: token0Address,
-        symbol: "UNKNOWN",
-        decimals: decimals0,
-      },
-      token1Info: {
-        address: token1Address,
-        symbol: "UNKNOWN",
-        decimals: decimals1,
-      },
+    };
+
+    const token1Info: TokenInfo = {
+      name: network.name,
+      address: token1Address,
+      symbol: "UNKNOWN",
+      decimals: decimals1,
+      reserve0: reserve0.toString(),
+      reserve1: reserve1.toString(),
+    };
+
+    return {
+      token0Info,
+      token1Info,
     };
   }
 }

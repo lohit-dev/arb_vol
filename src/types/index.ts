@@ -26,6 +26,8 @@ export interface ArbitrageOpportunity {
   estimatedProfit: number;
   gasEstimate: number;
   tradeAmount: number;
+  ethFee: number | undefined;
+  arbFee: number | undefined;
 }
 
 export interface TradeParams {
@@ -51,11 +53,12 @@ export interface SwapEventData {
 
 export interface PendingArbitrage {
   id: string;
-  opportunity: ArbitrageOpportunity;
-  timestamp: number;
+  buyNetwork: string;
+  sellNetwork: string;
+  buyTxHash: string;
+  sellTxHash: string;
   status: "pending" | "executing" | "completed" | "failed";
-  buyTxHash?: string;
-  sellTxHash?: string;
+  timestamp: number;
 }
 
 export interface DexScreenerResponse {
@@ -127,18 +130,6 @@ export interface RebalanceResult {
   success: boolean;
   volumeGenerated: number;
   attempts: number;
-}
-
-export interface SwapEventData {
-  network: string;
-  poolAddress: string;
-  txHash: string;
-  blockNumber: number;
-  amount0: ethers.BigNumber;
-  amount1: ethers.BigNumber;
-  sqrtPriceX96: ethers.BigNumber;
-  tick: number;
-  sender: string;
 }
 
 export interface QueueService {

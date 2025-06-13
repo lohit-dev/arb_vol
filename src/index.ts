@@ -13,9 +13,8 @@ async function main(): Promise<void> {
   await notificationService.sendStartupNotification(bot.getWalletAddress());
 
   bot.setMinProfitThreshold(0.1);
-  bot.setMinPriceDeviationThreshold(0.5);
-  bot.setTradeAmounts("1000000000000000000", "1000000000000000000");
-  bot.setProcessingCooldown(2000); // 2 seconds
+  bot.setMaxPriceDeviationThreshold(0.50);
+  bot.setProcessingCooldown(2000);
   // await bot.manualVolumeCheck();
 
   console.log(

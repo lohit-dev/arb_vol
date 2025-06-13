@@ -129,7 +129,7 @@ async function main() {
           sqrtPriceLimitX96: 0,
         },
         {
-          gasLimit: 500000, // Set a manual gas limit to avoid estimation issues
+          gasLimit: 5000000,
         }
       );
 
@@ -148,7 +148,7 @@ async function main() {
       const tx = await wallet.sendTransaction({
         to: poolAddress,
         value: ethers.utils.parseEther("0.001"),
-        gasLimit: 100000,
+        gasLimit: 1000000,
       });
 
       console.log(`Transaction sent: ${tx.hash}`);
